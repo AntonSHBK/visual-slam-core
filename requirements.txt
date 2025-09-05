@@ -1,0 +1,6 @@
+kornia
+cv2
+torch
+numpy
+pandas
+venv-python
