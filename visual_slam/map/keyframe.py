@@ -1,28 +1,35 @@
 import numpy as np
 
+
 class KeyFrame:
     _next_id = 0
 
-    def __init__(self, pose, keypoints, descriptors, timestamp=None):
+    def __init__(
+        self,
+        pose: np.ndarray,
+        keypoints: list,
+        descriptors: np.ndarray,
+        timestamp: float = None
+    ) -> None:
         """
         pose: np.ndarray (4x4) — матрица преобразования камеры в мировой системе
         keypoints: list[cv2.KeyPoint] или np.ndarray — список ключевых точек
         descriptors: np.ndarray — дескрипторы (N x D)
         timestamp: float — время съемки
         """
-        self.id = KeyFrame._next_id
+        self.id: int = KeyFrame._next_id
         KeyFrame._next_id += 1
 
-        self.pose = pose.astype(float)          # T_wc (камера в мировой системе)
-        self.keypoints = keypoints              # список ключевых точек
-        self.descriptors = descriptors          # матрица дескрипторов
-        self.timestamp = timestamp
+        self.pose: np.ndarray = pose.astype(float)      # T_wc (камера в мировой системе)
+        self.keypoints: list = keypoints                # список ключевых точек
+        self.descriptors: np.ndarray = descriptors      # матрица дескрипторов
+        self.timestamp: float = timestamp
 
         # Связи с MapPoints: idx kp -> MapPoint
-        self.points = {}
+        self.points: dict = {}
 
         # Статус
-        self.is_bad = False
+        self.is_bad: bool = False
 
     # ------------ Методы работы с MapPoints ------------
 

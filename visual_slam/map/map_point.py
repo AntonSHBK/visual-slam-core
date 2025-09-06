@@ -1,53 +1,58 @@
 import numpy as np
 
-class MapPoint:
-    _next_id = 0  # глобальный счётчик id
+from visual_slam.map.observation import Observations, Observation
 
-    def __init__(self, position, color=None, descriptor=None):
+class MapPoint:
+    _next_id = 0
+
+    def __init__(
+        self, 
+        position: np.ndarray, 
+        color: np.ndarray | None = None, 
+        descriptor: np.ndarray | None = None
+    ) -> None:
         """
         position: np.ndarray (3,) — координаты точки в мировой системе
         color: np.ndarray (3,) или (B, G, R), если доступен цвет
         descriptor: np.ndarray — дескриптор признака
         """
-        self.id = MapPoint._next_id
+        self.id: int = MapPoint._next_id
         MapPoint._next_id += 1
 
         # Геометрия
-        self.position = np.asarray(position, dtype=float)
-        self.normal = np.array([0, 0, 1], dtype=float)
+        self.position: np.ndarray = np.asarray(position, dtype=float)
+        self.normal: np.ndarray = np.array([0, 0, 1], dtype=float)
 
         # Визуальная информация
-        self.color = color
-        self.descriptor = descriptor
+        self.color: np.ndarray | None = color
+        self.descriptor: np.ndarray | None = descriptor
 
         # Наблюдения
-        self.observations = {}   # keyframe -> keypoint index
-        self.num_visible = 0     # сколько раз точка попадала в поле зрения
-        self.num_tracked = 0     # сколько раз реально заматчена
+        self.observations = Observations()
+        self.num_visible: int = 0     # сколько раз точка попадала в поле зрения
+        self.num_tracked: int = 0     # сколько раз реально заматчена
 
         # Состояние
-        self.is_bad = False
-        self.reference_keyframe = None
+        self.is_bad: bool = False
+        self.reference_keyframe: object | None = None
 
     # --------- Методы работы с наблюдениями ---------
 
-    def add_observation(self, keyframe, kp_idx):
-        """Добавить наблюдение из keyframe с индексом ключевой точки."""
-        if keyframe not in self.observations:
-            self.observations[keyframe] = kp_idx
+    def add_observation(self, kf_idx: int, kp_idx: int, uv=None, scale=None):
+        obs = Observation(kf_idx, kp_idx, uv, scale)
+        if self.observations.add(obs):
             self.num_visible += 1
             return True
         return False
 
-    def remove_observation(self, keyframe):
-        """Удалить наблюдение из keyframe."""
-        if keyframe in self.observations:
-            del self.observations[keyframe]
+    def remove_observation(self, kf_idx: int):
+        self.observations.remove(kf_idx)
         if len(self.observations) < 2:
             self.is_bad = True
 
     def get_observations(self):
-        return list(self.observations.items())
+        return self.observations.all()
+
 
     # --------- Методы обновления информации ---------
 
@@ -76,7 +81,6 @@ class MapPoint:
         if len(descs) == 1:
             self.descriptor = descs[0]
         else:
-            # простая стратегия: взять первый
             self.descriptor = descs[0]
 
     # --------- Утилиты ---------

@@ -3,13 +3,13 @@ import math
 import numpy as np
 import pytest
 
-from visual_slam.camera.camera import (
+from visual_slam.camera import (
     CameraBase, 
     PinholeCamera,
     fov2focal, 
     focal2fov
 )
-from visual_slam.camera.camera_utils import CameraUtils
+from visual_slam.utils.camera import CameraUtils
 
 
 def test_fov_focal_conversion():

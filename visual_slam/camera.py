@@ -1,9 +1,10 @@
 import cv2
 import numpy as np
 
-from visual_slam.camera.camera_utils import(
+from visual_slam.utils.camera import(
     CameraUtils, fov2focal, focal2fov
 )
+from visual_slam.utils.logging import get_logger
 
 
 class CameraBase:
@@ -16,7 +17,7 @@ class CameraBase:
         cx: float, 
         cy: float,
         dist_coeffs=None, 
-        fps: int = 30
+        log_dir="logs"
     ):
         """
         Параметры:
@@ -28,9 +29,17 @@ class CameraBase:
                 Координаты главной точки (principal point).
             dist_coeffs : list | np.ndarray | None
                 Коэффициенты дисторсии [k1, k2, p1, p2, k3].
-            fps : int
-                Частота кадров камеры.
         """
+        self.logger = get_logger(
+            self.__class__.__name__, 
+            log_dir=log_dir,
+            log_file=f"{self.__class__.__name__.lower()}.log",
+            log_level="INFO"
+        )
+        self.logger.info("Initializing CameraBase with parameters: "
+                          f"width={width}, height={height}, fx={fx}, fy={fy}, "
+                          f"cx={cx}, cy={cy}, dist_coeffs={dist_coeffs}")
+
         self.width = width
         self.height = height
         self.fx = fx
@@ -45,8 +54,6 @@ class CameraBase:
             self.dist_coeffs = np.zeros(5, dtype=float)
         else:
             self.dist_coeffs = np.array(dist_coeffs, dtype=float)
-
-        self.fps = fps
 
         self.u_min, self.u_max = 0, width
         self.v_min, self.v_max = 0, height
@@ -140,7 +147,7 @@ class CameraBase:
         return (f"CameraBase(width={self.width}, height={self.height}, "
                 f"fx={self.fx:.2f}, fy={self.fy:.2f}, "
                 f"cx={self.cx:.2f}, cy={self.cy:.2f}, "
-                f"fps={self.fps}, distorted={self.is_distorted})")
+                f"distorted={self.is_distorted})")
 
 
 class PinholeCamera(CameraBase):
@@ -157,14 +164,13 @@ class PinholeCamera(CameraBase):
         cx: float, 
         cy: float,
         dist_coeffs=None, 
-        fps: int = 30, 
         bf: float = None
     ):
         """
         bf : float | None
             baseline * fx (для стереокамеры). Если None — камера моно.
         """
-        super().__init__(width, height, fx, fy, cx, cy, dist_coeffs, fps)
+        super().__init__(width, height, fx, fy, cx, cy, dist_coeffs)
 
         self.K = self.get_intrinsics()
         self.Kinv = self.get_intrinsics_inv()

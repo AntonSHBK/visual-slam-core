@@ -1,7 +1,7 @@
 import threading
 
-from .map_point import MapPoint
-from .keyframe import KeyFrame
+from visual_slam.map.map_point import MapPoint
+from visual_slam.map.keyframe import KeyFrame
 
 class Map:
     """
@@ -10,11 +10,9 @@ class Map:
     """
 
     def __init__(self):
-        # Храним все мап-поинты и кейфреймы
         self._points = set()
         self._keyframes = set()
 
-        # Для потокобезопасности (если SLAM многопоточный)
         self._lock = threading.RLock()
 
     # ----------- Методы для работы с MapPoints -----------
