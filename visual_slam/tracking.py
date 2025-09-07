@@ -1,15 +1,15 @@
-from visual_slam.config import Config
+
+from visual_slam.slam import Slam
 
 
 class Tracking:
   
-    """
-    Класс для отслеживания объектов.
-    """
-
-    def __init__(self, config: Config):
-        self.config = config
+    def __init__(self, slam: 'Slam'):
+        self.slam = slam
 
     def track(self, frame):
         """Обновление состояния отслеживания."""
+        pass
+    
+    def bundle_adjust(self):
         pass

@@ -14,7 +14,7 @@ class SlamBase:
         raise NotImplementedError("SLAM run method not implemented.")
 
 
-class SimpleSlam(SlamBase):
+class Slam(SlamBase):
     """
     Простой класс для SLAM-систем.
     """
@@ -25,3 +25,7 @@ class SimpleSlam(SlamBase):
     def run(self):
         """Запуск процесса SLAM."""
         print("Запуск простого SLAM...")
+        
+        
+    def bundle_adjust(self):
+        pass
