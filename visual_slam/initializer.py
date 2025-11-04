@@ -173,44 +173,50 @@ class Initializer:
                 pts_ref_n, pts_cur_n, logger=self.logger
             )
             
+            # Tcr = poseRt(R, t)
+            Tcr = inv_poseRt(R, t.T)
+            
+            f_ref.pose = np.eye(4)
+            f_cur.pose = Tcr
+            
             if R is None or inliers < self.min_inliers:
                 self.logger.info(f"[Initializer] Ошибка: инициализация не удалась. Инлайеров: {inliers}, лимит: {self.min_inliers}.")
                 continue
             self.logger.info(f"[Initializer] Поза восстановлена. Инлайеров: {inliers}, лимит: {self.min_inliers}.")           
             
-            R = R.T
-            t = -R @ t
-            
-            tx, ty, tz = t.flatten()
+            delta_T = np.linalg.inv(f_ref.pose) @ f_cur.pose
+            delta_R = delta_T[:3, :3]
+            delta_t = delta_T[:3, 3]
 
-            rpy = np.degrees(rpy_from_rotation_matrix(R, degrees=True))
-            roll, pitch, yaw = rpy
+            tx, ty, tz = delta_t.flatten()
+            roll, pitch, yaw = np.degrees(rpy_from_rotation_matrix(delta_R, degrees=True))
 
             self.logger.info(
-                f"[Initializer] ΔPose: "
+                f"[Initializer] ΔPose (ref→cur): "
                 f"x={tx:.4f} m, y={ty:.4f} m, z={tz:.4f} m | "
                 f"roll={roll:.2f}°, pitch={pitch:.2f}°, yaw={yaw:.2f}°"
             )
             
-            f_ref.pose = np.eye(4)
-            f_cur.set_pose(R, t)
-            
             min_parallax_deg = self.config.tracking.min_parallax_deg
             
-            parallax = compute_normalize_parallax(
-                pts_ref_n=pts_ref_n,
-                pts_cur_n=pts_cur_n,
-                R=R
+            # parallax = compute_normalize_parallax(
+            #     pts_ref_n=pts_ref_n,
+            #     pts_cur_n=pts_cur_n,
+            #     R=R
+            # )
+
+            # self.logger.info(f"[Initializer] parallax={parallax:.2f}° - лимит {min_parallax_deg / 2}°")
+
+            # if parallax < min_parallax_deg / 2:
+            #     self.logger.info("[Initializer] Вырожденная сцена:малый параллакс.")
+            #     continue
+
+            pts_3d, mask_triang = triangulate_normalized_points(
+                pose_1w=f_cur.pose,
+                pose_2w=f_ref.pose,
+                pts_1=pts_cur_n,
+                pts_2=pts_ref_n
             )
-
-            self.logger.info(f"[Initializer] parallax={parallax:.2f}° - лимит {min_parallax_deg / 2}°")
-
-            if parallax < min_parallax_deg / 2:
-                self.logger.info("[Initializer] Вырожденная сцена:малый параллакс.")
-                continue
-
-            # --- Триангуляция ---
-            pts_3d, mask_triang = triangulate_normalized_points(f_ref.pose, f_cur.pose, pts_ref_n, pts_cur_n)
 
             pts_ref_n = pts_ref_n[mask_triang]
             pts_cur_n = pts_cur_n[mask_triang]
@@ -247,8 +253,6 @@ class Initializer:
             self._finalize_initialization(
                 f_ref=f_ref,
                 f_cur=f_cur,
-                R=R,
-                t=t,
                 pts_3d=pts_3d,
                 feature_result=feature_result,
             )
@@ -270,22 +274,20 @@ class Initializer:
         self, 
         f_ref: Frame, 
         f_cur: Frame, 
-        R, 
-        t, 
         pts_3d: np.ndarray,
         feature_result: "FeatureTrackingResult" = None
     ):
         
         self.logger.info("[Initializer] Начало финального этапа инициализации")
         kf_ref = KeyFrame(
-            pose=np.eye(4),
+            pose=f_ref.pose,
             keypoints=f_ref.keypoints_left,
             descriptors=f_ref.descriptors_left,
             timestamp=f_ref.timestamp,
         )
 
         kf_cur = KeyFrame(
-            pose=poseRt(R, t),
+            pose=f_cur.pose,
             keypoints=f_cur.keypoints_left,
             descriptors=f_cur.descriptors_left,
             timestamp=f_cur.timestamp,
