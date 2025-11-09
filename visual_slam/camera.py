@@ -2,7 +2,14 @@ import cv2
 import numpy as np
 
 from visual_slam.utils.camera import(
-    CameraUtils, fov2focal, focal2fov
+    are_in_image_numba,
+    fov2focal, 
+    focal2fov,
+    project_numba,
+    project_stereo_numba,
+    unproject_points_numba,
+    unproject_points_3d_numba
+    
 )
 from visual_slam.utils.logging import get_logger
 
@@ -16,7 +23,7 @@ class CameraBase:
         fy: float, 
         cx: float, 
         cy: float,
-        dist_coeffs=None, 
+        dist=None, 
         log_dir="logs"
     ):
         """
@@ -38,7 +45,7 @@ class CameraBase:
         )
         self.logger.info("Initializing CameraBase with parameters: "
                           f"width={width}, height={height}, fx={fx}, fy={fy}, "
-                          f"cx={cx}, cy={cy}, dist_coeffs={dist_coeffs}")
+                          f"cx={cx}, cy={cy}, dist_coeffs={dist}")
 
         self.width = width
         self.height = height
@@ -50,15 +57,18 @@ class CameraBase:
         self.fovx = focal2fov(fx, width)
         self.fovy = focal2fov(fy, height)
 
-        if dist_coeffs is None:
-            self.dist_coeffs = np.zeros(5, dtype=float)
+        if dist is None:
+            self.dist = np.zeros(5, dtype=float)
         else:
-            self.dist_coeffs = np.array(dist_coeffs, dtype=float)
+            self.dist = np.array(dist, dtype=float)
 
         self.u_min, self.u_max = 0, width
         self.v_min, self.v_max = 0, height
 
-        self.is_distorted = np.linalg.norm(self.dist_coeffs) > 1e-10
+        self.is_distorted = np.linalg.norm(self.dist) > 1e-10
+        
+        self.K = self.get_intrinsics()
+        self.Kinv = self.get_intrinsics_inv()
         
     def is_in_image(self, uv, z: float = 1.0) -> bool:
         """
@@ -82,7 +92,7 @@ class CameraBase:
 
         Возвращает булев массив (N,), где True — точка видна в кадре.
         """
-        return CameraUtils.are_in_image_numba(uvs, zs, self.u_min, self.u_max, self.v_min, self.v_max)        
+        return are_in_image_numba(uvs, zs, self.u_min, self.u_max, self.v_min, self.v_max)        
 
     def get_intrinsics(self) -> np.ndarray:
         """
@@ -172,9 +182,6 @@ class PinholeCamera(CameraBase):
         """
         super().__init__(width, height, fx, fy, cx, cy, dist_coeffs)
 
-        self.K = self.get_intrinsics()
-        self.Kinv = self.get_intrinsics_inv()
-
         self.bf = bf
 
     # -----------------------------
@@ -191,7 +198,7 @@ class PinholeCamera(CameraBase):
         """
         if points_3d.ndim == 1:
             points_3d = points_3d.reshape(1, 3)
-        return CameraUtils.project_numba(points_3d.astype(np.float64), self.K)
+        return project_numba(points_3d.astype(np.float64), self.K)
 
     def project_stereo(self, points_3d: np.ndarray):
         """
@@ -206,7 +213,7 @@ class PinholeCamera(CameraBase):
             raise ValueError("Stereo projection requires bf (baseline * fx)")
         if points_3d.ndim == 1:
             points_3d = points_3d.reshape(1, 3)
-        return CameraUtils.project_stereo_numba(points_3d.astype(np.float64), self.K, self.bf)
+        return project_stereo_numba(points_3d.astype(np.float64), self.K, self.bf)
 
     # -----------------------------
     # Обратная проекция
@@ -232,13 +239,13 @@ class PinholeCamera(CameraBase):
         """
         Обратная проекция массива пикселей (N,2) в нормализованные координаты (z=1).
         """
-        return CameraUtils.unproject_points_numba(uvs.astype(np.float64), self.Kinv)
+        return unproject_points_numba(uvs.astype(np.float64), self.Kinv)
 
     def unproject_points_3d(self, uvs: np.ndarray, depths: np.ndarray):
         """
         Обратная проекция массива пикселей (N,2) + глубины (N,) в 3D (N,3).
         """
-        return CameraUtils.unproject_points_3d_numba(
+        return unproject_points_3d_numba(
             uvs.astype(np.float64), depths.astype(np.float64), self.Kinv
         )
 
@@ -252,7 +259,7 @@ class PinholeCamera(CameraBase):
         """
         if self.is_distorted:
             uvs_contiguous = np.ascontiguousarray(uvs[:, :2]).reshape((-1, 1, 2))
-            uvs_undistorted = cv2.undistortPoints(uvs_contiguous, self.K, self.dist_coeffs, None, self.K)
+            uvs_undistorted = cv2.undistortPoints(uvs_contiguous, self.K, self.dist, None, self.K)
             return uvs_undistorted.reshape(-1, 2)
         else:
             return uvs
@@ -271,7 +278,7 @@ class PinholeCamera(CameraBase):
         if self.is_distorted:
             uv_bounds_undistorted = cv2.undistortPoints(
                 np.expand_dims(uv_bounds, axis=1),
-                self.K, self.dist_coeffs, None, self.K
+                self.K, self.dist, None, self.K
             )
             uv_bounds_undistorted = uv_bounds_undistorted.reshape(-1, 2)
         else:

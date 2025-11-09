@@ -1,7 +1,9 @@
+from ast import List, Set
 import threading
 
 from visual_slam.map.map_point import MapPoint
 from visual_slam.map.keyframe import KeyFrame
+from visual_slam.frame import Frame
 
 class Map:
     """
@@ -10,14 +12,13 @@ class Map:
     """
 
     def __init__(self):
-        self._points = set()
-        self._keyframes = set()
+        self._points: Set[MapPoint] = set()
+        self._keyframes: Set[KeyFrame] = set()
+        self._frame: Set[Frame] = set()
 
         self._lock = threading.RLock()
 
-    # ----------- Методы для работы с MapPoints -----------
-
-    def add_point(self, mpt: MapPoint):
+    def add_map_point(self, mpt: MapPoint):
         """Добавить новую 3D-точку на карту."""
         with self._lock:
             self._points.add(mpt)
@@ -28,15 +29,13 @@ class Map:
             if mpt in self._points:
                 self._points.remove(mpt)
 
-    def get_points(self):
+    def get_points(self) -> list[MapPoint]:
         """Вернуть список всех 3D-точек."""
         with self._lock:
             return list(self._points)
 
-    def num_points(self):
+    def num_points(self) -> int:
         return len(self._points)
-
-    # ----------- Методы для работы с KeyFrames -----------
 
     def add_keyframe(self, kf: KeyFrame):
         """Добавить ключевой кадр в карту."""
@@ -49,16 +48,22 @@ class Map:
             if kf in self._keyframes:
                 self._keyframes.remove(kf)
 
-    def get_keyframes(self):
+    def get_keyframes(self) -> list[KeyFrame]:
         with self._lock:
             return list(self._keyframes)
 
-    def num_keyframes(self):
+    def num_keyframes(self) -> int:
         return len(self._keyframes)
 
-    # ----------- Утилиты -----------
+    def compute_mean_reproj_error(self, points: List[MapPoint]):
+        
+        pass
+    
+    def opimize(self):
+        
+        pass
 
-    def clear(self):
+    def reset(self):
         """Очистить всю карту (например, при ресете)."""
         with self._lock:
             self._points.clear()

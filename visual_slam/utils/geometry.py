@@ -78,14 +78,14 @@ def s1_dist_rad(angle1: float, angle2: float) -> float:
 # Переходы между SE(3), Sim(3) и матрицами
 # ------------------------------
 
-@njit
+# @njit
 def poseRt(R: np.ndarray, t: np.ndarray) -> np.ndarray:
     """
     Собрать SE(3) матрицу из R (3x3) и t (3,).
     """
     T = np.eye(4)
     T[:3, :3] = R
-    T[:3, 3] = t
+    T[:3, 3] = t.ravel()
     return T
 
 
@@ -97,7 +97,7 @@ def inv_poseRt(R: np.ndarray, t: np.ndarray) -> np.ndarray:
     T = np.eye(4)
     R_T = R.T
     T[:3, :3] = R_T
-    T[:3, 3] = -R_T @ np.ascontiguousarray(t)
+    T[:3, 3] = -R_T @ np.ascontiguousarray(t.ravel())
     return T
 
 
@@ -294,9 +294,12 @@ def normalize(Kinv: np.ndarray, pts: np.ndarray) -> np.ndarray:
 
     Возвращает: (N,2) массив нормализованных координат [x/z, y/z].
     """
-    uv1 = np.ones((pts.shape[0], 3), dtype=pts.dtype)
-    uv1[:, 0:2] = pts
-    return (Kinv @ uv1.T).T[:, 0:2]
+    Kinv64 = Kinv.astype(np.float64)
+    pts64 = pts.astype(np.float64)
+    uv1 = np.ones((pts64.shape[0], 3), dtype=np.float64)
+    uv1[:, 0:2] = pts64
+    return (Kinv64 @ uv1.T).T[:, 0:2]
+
 
 
 # ------------------------------
@@ -384,18 +387,18 @@ def rotation_matrix_from_yaw_pitch_roll(yaw_deg, pitch_deg, roll_deg) -> np.ndar
     return Rz @ Ry @ Rx
 
 
-def rpy_from_rotation_matrix(R: np.ndarray) -> np.ndarray:
+def rpy_from_rotation_matrix(R: np.ndarray, degrees: bool = False) -> np.ndarray:
     """
     Преобразовать матрицу вращения в углы (roll, pitch, yaw) [рад].
     """
-    return Rotation.from_matrix(R).as_euler("xyz", degrees=False)
+    return Rotation.from_matrix(R).as_euler("xyz", degrees=degrees)
 
 
-def euler_from_rotation(R: np.ndarray, order="xyz") -> np.ndarray:
+def euler_from_rotation(R: np.ndarray, order="xyz", degrees: bool = False) -> np.ndarray:
     """
     Преобразовать матрицу вращения в углы Эйлера (по порядку).
     """
-    return Rotation.from_matrix(R).as_euler(order, degrees=False)
+    return Rotation.from_matrix(R).as_euler(order, degrees=degrees)
 
 
 # ------------------------------

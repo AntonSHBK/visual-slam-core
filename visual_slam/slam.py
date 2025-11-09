@@ -1,31 +1,54 @@
-from visual_slam.config import Config
+from visual_slam.map.map import Map
+from visual_slam.state import State
+from visual_slam.tracking import Tracking
+from visual_slam.feature.tracker import FeatureTracker
+from visual_slam.utils.logging import get_logger
 
 
-class SlamBase:
-    """
-    Базовый класс для SLAM-систем.
-    """
-
-    def __init__(self, config: Config):
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from visual_slam.camera import CameraBase
+    from visual_slam.config import Config
+    
+class SLAM:
+    def __init__(
+        self, 
+        camera: "CameraBase", 
+        config: "Config",
+        log_dir="logs"
+    ):
+        self.logger = get_logger(
+            self.__class__.__name__, 
+            log_dir=log_dir,
+            log_file=f"{self.__class__.__name__.lower()}.log",
+            log_level="INFO"
+        )
+        
+        self.state = State.NO_IMAGES_YET        
+        
+        self.camera = camera        
         self.config = config
-
-    def run(self):
-        """Запуск процесса SLAM."""
-        raise NotImplementedError("SLAM run method not implemented.")
-
-
-class Slam(SlamBase):
-    """
-    Простой класс для SLAM-систем.
-    """
-
-    def __init__(self, config: Config):
-        super().__init__(config)
-
-    def run(self):
-        """Запуск процесса SLAM."""
-        print("Запуск простого SLAM...")
         
-        
-    def bundle_adjust(self):
-        pass
+        self.map = Map()   
+             
+        self.feature_tracker = FeatureTracker(
+            detector=config.features.detector,
+            matcher=config.features.matcher,
+            detector_params=config.features.detector_params,
+            matcher_params=config.features.matcher_params,
+        )
+        self.tracking = Tracking(self, config)
+
+        # TODO: сюда же добавим LocalMapping и LoopClosing
+        self.local_mapping = None
+        self.loop_closing = None
+
+        self.is_running = False
+
+    def track(self, images, timestamp=None, depth=None):
+        return self.tracking.track(images, timestamp, depth=depth)
+
+    def reset(self):
+        self.map.reset()
+        self.tracking.reset()
+        # TODO: сбросить и другие модули

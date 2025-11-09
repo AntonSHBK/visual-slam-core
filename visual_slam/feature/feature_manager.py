@@ -3,6 +3,7 @@ from visual_slam.feature.feature import (
     ORBFeature2D,
     SIFTFeature2D,
     FastBriefFeature2D,
+    FastOrbAnmsFeature2D
 )
 from visual_slam.feature.matcher import (
     BFMatcherHamming,
@@ -15,6 +16,8 @@ def feature_factory(name: str, **kwargs) -> BaseFeature2D:
     name = name.lower()
     if name == "orb":
         return ORBFeature2D(**kwargs)
+    elif name in ("fast_orb_anms", "fast-orb-anms"):
+        return FastOrbAnmsFeature2D(**kwargs)
     elif name == "sift":
         return SIFTFeature2D(**kwargs)
     elif name in ("fastbrief", "fast+brief", "fb"):
@@ -25,7 +28,7 @@ def feature_factory(name: str, **kwargs) -> BaseFeature2D:
 
 def matcher_factory(name: str, **kwargs) -> BaseMatcher:
     name = name.lower()
-    if name in ("bf-hamming", "hamming"):
+    if name in ("bf_hamming", "bf-hamming", "hamming"):
         return BFMatcherHamming(**kwargs)
     elif name in ("bf-l2", "l2"):
         return BFMatcherL2(**kwargs)
@@ -46,12 +49,13 @@ class FeatureManager:
         detector_params: dict = None,
         matcher_params: dict = None
     ):
-        self.feature = feature_factory(detector, **(detector_params or {}))
-        self.matcher = matcher_factory(matcher, **(matcher_params or {}))
+        detector_params = detector_params or {}
+        matcher_params = matcher_params or {}
+        
+        self.feature = feature_factory(detector, **detector_params)
+        self.matcher = matcher_factory(matcher, **matcher_params)
 
     def detectAndCompute(self, image, mask=None):
-        # kps, des = self.feature.detectAndCompute(image, mask)
-        # self.filter_keypoints
         return self.feature.detectAndCompute(image, mask)
 
     def match(self, desc1, desc2):

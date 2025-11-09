@@ -6,33 +6,46 @@ import numpy as np
 import cv2
 
 from visual_slam.feature.feature_manager import FeatureManager
+from visual_slam.utils.keypoints import filter_keypoints
+from visual_slam.utils.matching import filter_matches
+from visual_slam.viz.feature_viz import FeatureVisualizer
 
 
 @dataclass
 class FeatureTrackingResult:
     matches: List[cv2.DMatch]
-    idxs_ref: List[int]
-    idxs_cur: List[int]
-    kps_ref_matched: np.ndarray  # shape (N,2), float32
-    kps_cur_matched: np.ndarray  # shape (N,2), float32
-    des_ref: Optional[np.ndarray]
-    des_cur: Optional[np.ndarray]
+    idxs1: List[int]
+    idxs2: List[int]
+    kps1_matched: np.ndarray  # shape (N,2), float32
+    kps2_matched: np.ndarray  # shape (N,2), float32
+    des1: Optional[np.ndarray]
+    des2: Optional[np.ndarray]
 
 
 class BaseTracker(ABC):
     @abstractmethod
     def detectAndCompute(
-        self, image: np.ndarray, mask: Optional[np.ndarray] = None
+        self, 
+        image: np.ndarray, 
+        mask: Optional[np.ndarray] = None
     ) -> Tuple[List[cv2.KeyPoint], Optional[np.ndarray]]:
+        pass
+    
+    @abstractmethod
+    def match(
+        self, 
+        img1: Optional[np.ndarray], 
+        img2: Optional[np.ndarray]
+    ) -> List[cv2.DMatch]:
         pass
 
     @abstractmethod
     def track(
         self,
-        image_ref: np.ndarray,
-        image_cur: np.ndarray,
-        kps_ref: List[cv2.KeyPoint],
-        des_ref: Optional[np.ndarray],
+        img1: np.ndarray,
+        img2: np.ndarray,
+        kps1: List[cv2.KeyPoint],
+        des2: Optional[np.ndarray],
     ) -> FeatureTrackingResult:
         pass
 
@@ -53,32 +66,101 @@ class FeatureTracker(BaseTracker):
         )
 
     def detectAndCompute(
-        self, image: np.ndarray, mask: Optional[np.ndarray] = None
+        self, 
+        image: np.ndarray, 
+        mask: Optional[np.ndarray] = None
     ) -> Tuple[List[cv2.KeyPoint], Optional[np.ndarray]]:
         return self.feature_manager.detectAndCompute(image, mask)
-
+    
+    def match(
+            self, 
+            des1: Optional[np.ndarray], 
+            des2: Optional[np.ndarray]
+        ) -> List[cv2.DMatch]:
+            return self.feature_manager.match(des1, des2)
+        
     def track(
         self,
-        image_ref: np.ndarray,
-        image_cur: np.ndarray,
-        kps_ref: List[cv2.KeyPoint],
-        des_ref: Optional[np.ndarray],
+        img1: np.ndarray,
+        img2: np.ndarray,
+        kps1: Optional[List[cv2.KeyPoint]] = None,
+        des1: Optional[np.ndarray] = None,
+        kps2: Optional[List[cv2.KeyPoint]] = None,
+        des2: Optional[np.ndarray] = None,
+        logger=None,
+        filtered_params: Optional[dict] = None
     ) -> FeatureTrackingResult:
-        kps_cur, des_cur = self.detectAndCompute(image_cur)
-        matches = self.feature_manager.match(des_ref, des_cur)
+        
+        # viz = FeatureVisualizer(window_name_prefix="FeatureTracker")
 
-        idxs_ref = [m.queryIdx for m in matches]
-        idxs_cur = [m.trainIdx for m in matches]
+        if kps2 is None or des2 is None:
+            kps2, des2 = self.detectAndCompute(img2)
+        
+        if kps1 is None or des1 is None:
+            kps1, des1 = self.detectAndCompute(img1)    
+        
+        if logger:
+            logger.info(f"[Track] Обнаружено {len(kps2)} точек в текущем кадре.")
+            logger.info(f"[Track] Обнаружено {len(kps1)} точек в эталонном кадре.")
+        
+        # viz.draw_keypoints(image_cur, kps_cur, window_name="Before filtering")
+        
+        kps2, des2 = filter_keypoints(
+            kps=kps2,
+            des=des2,
+            logger=logger,
+            **filtered_params
+        )
+        
+        # viz.draw_keypoints(image_cur, kps_cur, window_name="After filtering")
+        
+        matches = self.match(des1, des2)
+        if logger:
+            logger.info(f"[Track] Найдено {len(matches)} исходных совпадений.")
+        
+        # viz.draw_matches(
+        #     image_ref,
+        #     image_cur,
+        #     kps_ref,
+        #     kps_cur,
+        #     matches,
+        #     window_name="Matches raw",
+        #     max_display=None
+        # )
+        
+        matches = filter_matches(
+            matches,
+            kps1=kps1,
+            kps2=kps2,
+            logger=logger,
+            **filtered_params
+        )   
+        
+        # viz.draw_matches(
+        #     image_ref,
+        #     image_cur,
+        #     kps_ref,
+        #     kps_cur,
+        #     matches,
+        #     window_name="Matches filtered",
+        #     max_display=None
+        # )    
 
-        kps_ref_matched = np.array([kps_ref[i].pt for i in idxs_ref], dtype=np.float32)
-        kps_cur_matched = np.array([kps_cur[i].pt for i in idxs_cur], dtype=np.float32)
+        idxs1 = [m.queryIdx for m in matches]
+        idxs2 = [m.trainIdx for m in matches]
+
+        kps1_matched = np.array([kps1[i].pt for i in idxs1], dtype=np.float32)
+        kps2_matched = np.array([kps2[i].pt for i in idxs2], dtype=np.float32)
+
+        if logger:
+            logger.info("[Track] Завершение трекинга")
 
         return FeatureTrackingResult(
             matches=matches,
-            idxs_ref=idxs_ref,
-            idxs_cur=idxs_cur,
-            kps_ref_matched=kps_ref_matched,
-            kps_cur_matched=kps_cur_matched,
-            des_ref=des_ref,
-            des_cur=des_cur,
+            idxs1=idxs1,
+            idxs2=idxs2,
+            kps1_matched=kps1_matched,
+            kps2_matched=kps2_matched,
+            des1=des1,
+            des2=des2,
         )

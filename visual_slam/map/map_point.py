@@ -30,10 +30,10 @@ class MapPoint:
         # Наблюдения
         self.observations = Observations()
         self.num_visible: int = 0     # сколько раз точка попадала в поле зрения
-        self.num_tracked: int = 0     # сколько раз реально заматчена
+        self.num_tracked: int = 0     # сколько раз заматчена
 
         # Состояние
-        self.is_bad: bool = False
+        self._is_bad: bool = False
         self.reference_keyframe: object | None = None
 
     # --------- Методы работы с наблюдениями ---------
@@ -48,7 +48,7 @@ class MapPoint:
     def remove_observation(self, kf_idx: int):
         self.observations.remove(kf_idx)
         if len(self.observations) < 2:
-            self.is_bad = True
+            self._is_bad = True
 
     def get_observations(self):
         return self.observations.all()
@@ -82,6 +82,20 @@ class MapPoint:
             self.descriptor = descs[0]
         else:
             self.descriptor = descs[0]
+            
+    def mark_as_bad(self):
+        """Пометить точку как плохую (например, после BA или фильтрации)."""
+        self._is_bad = True
+
+    def is_valid(self) -> bool:
+        """Возвращает True, если точка пригодна для использования."""
+        if self._is_bad:
+            return False
+        if not np.isfinite(self.position).all():
+            return False
+        if self.position[2] <= 0:
+            return False
+        return True
 
     # --------- Утилиты ---------
 
