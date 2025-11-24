@@ -14,9 +14,9 @@ from visual_slam.utils.camera import(
 from visual_slam.utils.logging import get_logger
 
 
-class CameraBase:
+class Camera:
     def __init__(
-        self, 
+        self,
         width: int, 
         height: int,
         fx: float, 
@@ -67,8 +67,13 @@ class CameraBase:
 
         self.is_distorted = np.linalg.norm(self.dist) > 1e-10
         
-        self.K = self.get_intrinsics()
-        self.Kinv = self.get_intrinsics_inv()
+    @property
+    def K(self) -> np.ndarray:
+        return self.get_intrinsics()
+    
+    @property
+    def Kinv(self) -> np.ndarray:
+        return self.get_intrinsics_inv()
         
     def is_in_image(self, uv, z: float = 1.0) -> bool:
         """
@@ -92,7 +97,9 @@ class CameraBase:
 
         Возвращает булев массив (N,), где True — точка видна в кадре.
         """
-        return are_in_image_numba(uvs, zs, self.u_min, self.u_max, self.v_min, self.v_max)        
+        return are_in_image_numba(
+            uvs, zs, self.u_min, self.u_max, self.v_min, self.v_max
+        )        
 
     def get_intrinsics(self) -> np.ndarray:
         """
@@ -108,86 +115,6 @@ class CameraBase:
         """
         return np.linalg.inv(self.get_intrinsics())
     
-    def get_render_projection_matrix(self, znear=0.01, zfar=100.0) -> np.ndarray:
-        """
-        Возвращает матрицу проекции (4x4) для рендеринга в OpenGL/Open3D.
-        """
-        W, H = self.width, self.height
-        fx, fy = self.fx, self.fy
-        cx, cy = self.cx, self.cy
-
-        left = ((2 * cx - W) / W - 1.0) * W / 2.0
-        right = ((2 * cx - W) / W + 1.0) * W / 2.0
-        top = ((2 * cy - H) / H + 1.0) * H / 2.0
-        bottom = ((2 * cy - H) / H - 1.0) * H / 2.0
-
-        left = znear / fx * left
-        right = znear / fx * right
-        top = znear / fy * top
-        bottom = znear / fy * bottom
-
-        P = np.zeros((4, 4), dtype=float)
-        z_sign = 1.0
-
-        P[0, 0] = 2.0 * znear / (right - left)
-        P[1, 1] = 2.0 * znear / (top - bottom)
-        P[0, 2] = (right + left) / (right - left)
-        P[1, 2] = (top + bottom) / (top - bottom)
-        P[3, 2] = z_sign
-        P[2, 2] = z_sign * zfar / (zfar - znear)
-        P[2, 3] = -(zfar * znear) / (zfar - znear)
-
-        return P
-
-    def set_fovx(self, fovx: float):
-        """
-        Установить горизонтальный угол обзора (в радианах) и пересчитать fx.
-        """
-        self.fx = fov2focal(fovx, self.width)
-        self.fovx = fovx
-
-    def set_fovy(self, fovy: float):
-        """
-        Установить вертикальный угол обзора (в радианах) и пересчитать fy.
-        """
-        self.fy = fov2focal(fovy, self.height)
-        self.fovy = fovy
-
-    def __repr__(self):
-        return (f"CameraBase(width={self.width}, height={self.height}, "
-                f"fx={self.fx:.2f}, fy={self.fy:.2f}, "
-                f"cx={self.cx:.2f}, cy={self.cy:.2f}, "
-                f"distorted={self.is_distorted})")
-
-
-class PinholeCamera(CameraBase):
-    """
-    Камера с моделью pinhole (отсутствие дисторсии или простая коррекция).
-    """
-
-    def __init__(
-        self, 
-        width: int, 
-        height: int,
-        fx: float, 
-        fy: float, 
-        cx: float, 
-        cy: float,
-        dist_coeffs=None, 
-        bf: float = None
-    ):
-        """
-        bf : float | None
-            baseline * fx (для стереокамеры). Если None — камера моно.
-        """
-        super().__init__(width, height, fx, fy, cx, cy, dist_coeffs)
-
-        self.bf = bf
-
-    # -----------------------------
-    # Проекция
-    # -----------------------------
-
     def project(self, points_3d: np.ndarray):
         """
         Проекция 3D точек (N,3) на изображение.
@@ -199,26 +126,7 @@ class PinholeCamera(CameraBase):
         if points_3d.ndim == 1:
             points_3d = points_3d.reshape(1, 3)
         return project_numba(points_3d.astype(np.float64), self.K)
-
-    def project_stereo(self, points_3d: np.ndarray):
-        """
-        Проекция 3D точек для стереокамеры (N,3).
-        Требуется self.bf.
-
-        Возвращает:
-            uvs : (N,3) — [u_left, v, u_right]
-            zs  : (N,)  — глубины
-        """
-        if self.bf is None:
-            raise ValueError("Stereo projection requires bf (baseline * fx)")
-        if points_3d.ndim == 1:
-            points_3d = points_3d.reshape(1, 3)
-        return project_stereo_numba(points_3d.astype(np.float64), self.K, self.bf)
-
-    # -----------------------------
-    # Обратная проекция
-    # -----------------------------
-
+    
     def unproject(self, uv: np.ndarray):
         """
         Обратная проекция одного пикселя в нормализованную 2D точку (z=1).
@@ -249,10 +157,6 @@ class PinholeCamera(CameraBase):
             uvs.astype(np.float64), depths.astype(np.float64), self.Kinv
         )
 
-    # -----------------------------
-    # Коррекция искажений
-    # -----------------------------
-
     def undistort_points(self, uvs: np.ndarray):
         """
         Убирает дисторсию у массива пикселей (N,2).
@@ -263,6 +167,68 @@ class PinholeCamera(CameraBase):
             return uvs_undistorted.reshape(-1, 2)
         else:
             return uvs
+
+        return P
+
+    def set_fovx(self, fovx: float):
+        """
+        Установить горизонтальный угол обзора (в радианах) и пересчитать fx.
+        """
+        self.fx = fov2focal(fovx, self.width)
+        self.fovx = fovx
+
+    def set_fovy(self, fovy: float):
+        """
+        Установить вертикальный угол обзора (в радианах) и пересчитать fy.
+        """
+        self.fy = fov2focal(fovy, self.height)
+        self.fovy = fovy
+
+    def __repr__(self):
+        return (f"CameraBase(width={self.width}, height={self.height}, "
+                f"fx={self.fx:.2f}, fy={self.fy:.2f}, "
+                f"cx={self.cx:.2f}, cy={self.cy:.2f}, "
+                f"distorted={self.is_distorted})")
+
+
+class PinholeCamera(Camera):
+    """
+    Камера с моделью pinhole (отсутствие дисторсии или простая коррекция).
+    """
+
+    def __init__(
+        self, 
+        width: int, 
+        height: int,
+        fx: float, 
+        fy: float, 
+        cx: float, 
+        cy: float,
+        dist_coeffs=None, 
+        bf: float = None
+    ):
+        """
+        bf : float | None
+            baseline * fx (для стереокамеры). Если None — камера моно.
+        """
+        super().__init__(width, height, fx, fy, cx, cy, dist_coeffs)
+
+        self.bf = bf
+
+    def project_stereo(self, points_3d: np.ndarray):
+        """
+        Проекция 3D точек для стереокамеры (N,3).
+
+        Возвращает:
+            uvs : (N,3) — [u_left, v, u_right]
+            zs  : (N,)  — глубины
+        """
+        if self.bf is None:
+            raise ValueError("Stereo projection requires bf (baseline * fx)")
+        if points_3d.ndim == 1:
+            points_3d = points_3d.reshape(1, 3)
+        return project_stereo_numba(points_3d.astype(np.float64), self.K, self.bf)
+
 
     def undistort_image_bounds(self):
         """

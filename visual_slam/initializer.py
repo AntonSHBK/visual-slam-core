@@ -1,32 +1,32 @@
-from dataclasses import dataclass
 from collections import deque
 from typing import List, Optional, Any, Deque
 
 import cv2
 import numpy as np
-from sympy import im
 
+from visual_slam import camera
 from visual_slam.map.keyframe import KeyFrame
 from visual_slam.map.map_point import MapPoint
 from visual_slam.utils.logging import get_logger
 from visual_slam.utils.geometry import (
     poseRt, 
     inv_poseRt, 
-    rpy_from_rotation_matrix
+    rpy_from_rotation_matrix,
+    compute_reprojection_error
 )
 from visual_slam.utils.motion_estimation import (
-        estimate_motion_from_2d2d,
-        triangulate_points,
-        triangulate_normalized_points,
-        compute_baseline,
-        compute_parallax,
-        compute_normalize_parallax,
-        filter_by_parallax,
-        check_feature_coverage,
-        normalize_depth_scale,
-        triangulate_stereo_points,
-        image_to_gray
-    )
+    estimate_motion_from_2d2d,
+    triangulate_points,
+    triangulate_normalized_points,
+    compute_baseline,
+    compute_parallax,
+    compute_normalize_parallax,
+    filter_by_parallax,
+    check_feature_coverage,
+    normalize_depth_scale,
+    triangulate_stereo_points,
+    image_to_gray
+)
 
 from visual_slam.utils.geometry import normalize
 from visual_slam.viz.feature_viz import FeatureVisualizer
@@ -59,7 +59,7 @@ class Initializer:
         self.min_inliers = self.config.tracking.min_inliers
         self.camera = self.tracking.camera
         
-        self.frames: Deque[Frame] = deque(maxlen=5)
+        self.frames = self.tracking.map.frames
         
         self.initialized: bool = False
         self.num_failures = 0
@@ -88,6 +88,7 @@ class Initializer:
 
         frame = Frame(
             timestamp=timestamp,
+            camera=self.camera,
             images=images,
             images_gray=images_gray,
             keypoints=keypoints_list,
@@ -119,13 +120,11 @@ class Initializer:
         
     def _initialize_mono(self, image, timestamp) -> bool:
         
-        self.add_frame(images=[image], timestamp=timestamp)
+        f_cur = self.add_frame(images=[image], timestamp=timestamp)
         
         if len(self.frames) < 2:
             self.logger.info("[Initializer] Недостаточно кадров в очереди для инициализации.")
             return False
-        
-        f_cur = self.frames[-1]
         
         Kinv = self.camera.get_intrinsics_inv()
 
@@ -173,10 +172,8 @@ class Initializer:
                 pts_ref_n, pts_cur_n, logger=self.logger
             )
             
-            Tcr = inv_poseRt(R, t.T)
-            
-            f_ref.pose = np.eye(4)
-            f_cur.pose = Tcr
+            Tcr = inv_poseRt(R, t.T)            
+            f_cur.update_pose(Tcr)
             
             if R is None or inliers < self.min_inliers:
                 self.logger.info(f"[Initializer] Ошибка: инициализация не удалась. Инлайеров: {inliers}, лимит: {self.min_inliers}.")
@@ -184,17 +181,14 @@ class Initializer:
             self.logger.info(f"[Initializer] Поза восстановлена. Инлайеров: {inliers}, лимит: {self.min_inliers}.")           
             
             if self.config.debug:
-                delta_T = np.linalg.inv(f_ref.pose) @ f_cur.pose
-                delta_R = delta_T[:3, :3]
-                delta_t = delta_T[:3, 3]
-
-                tx, ty, tz = delta_t.flatten()
-                roll, pitch, yaw = np.degrees(rpy_from_rotation_matrix(delta_R, degrees=True))
-
-                self.logger.debug(
-                    f"[Initializer] ΔPose (ref→cur): "
-                    f"x={tx:.4f} m, y={ty:.4f} m, z={tz:.4f} m | "
-                    f"roll={roll:.2f}°, pitch={pitch:.2f}°, yaw={yaw:.2f}°"
+                delta_T = f_ref.Twc @ f_cur.Tcw
+                R = delta_T[:3, :3]
+                t = delta_T[:3, 3]
+                roll, pitch, yaw = rpy_from_rotation_matrix(R, degrees=True)
+                self.logger.info(
+                    f"[Initializer] ΔPose: "
+                    f"t=({t[0]:.3f}, {t[1]:.3f}, {t[2]:.3f}), "
+                    f"RPY=({roll:.1f}, {pitch:.1f}, {yaw:.1f})"
                 )
             
             min_parallax_deg = self.config.tracking.min_parallax_deg
@@ -202,8 +196,8 @@ class Initializer:
             parallax = compute_normalize_parallax(
                 pts_ref_n=pts_ref_n,
                 pts_cur_n=pts_cur_n,
-                pose_ref=f_ref.pose,
-                pose_cur=f_cur.pose,
+                pose_ref=f_ref.Tcw,
+                pose_cur=f_cur.Tcw,
             )
 
             self.logger.info(f"[Initializer] parallax={parallax:.2f}° - лимит {min_parallax_deg / 2}°")
@@ -213,8 +207,8 @@ class Initializer:
                 continue
 
             pts_3d, mask_triang = triangulate_normalized_points(
-                pose_1w=f_cur.pose,
-                pose_2w=f_ref.pose,
+                pose_1w=f_cur.Tcw,
+                pose_2w=f_ref.Tcw,
                 pts_1=pts_cur_n,
                 pts_2=pts_ref_n
             )
@@ -230,8 +224,8 @@ class Initializer:
             mask_parallax, ang = filter_by_parallax(
                 pts_ref_n=pts_ref_n,
                 pts_cur_n=pts_cur_n,
-                pose_ref=f_ref.pose,
-                pose_cur=f_cur.pose,
+                pose_ref=f_ref.Tcw,
+                pose_cur=f_cur.Tcw,
                 min_parallax_deg=min_parallax_deg
             )
 
@@ -247,8 +241,8 @@ class Initializer:
             self._finalize_initialization(
                 f_ref=f_ref,
                 f_cur=f_cur,
-                pts_3d=pts_3d,
-                feature_result=feature_result,
+                points_3d_list=[pts_3d],
+                feature_results=[feature_result],
             )
             return True
 
@@ -268,79 +262,91 @@ class Initializer:
         self, 
         f_ref: Frame, 
         f_cur: Frame, 
-        pts_3d: np.ndarray,
-        feature_result: "FeatureTrackingResult" = None
+        points_3d_list: list[np.ndarray],
+        feature_results: list["FeatureTrackingResult"] = None
     ):
         
         self.logger.info("[Initializer] Начало финального этапа инициализации")
-        kf_ref = KeyFrame(
-            pose=f_ref.pose,
-            keypoints=f_ref.keypoints_left,
-            descriptors=f_ref.descriptors_left,
-            timestamp=f_ref.timestamp,
-        )
-
-        kf_cur = KeyFrame(
-            pose=f_cur.pose,
-            keypoints=f_cur.keypoints_left,
-            descriptors=f_cur.descriptors_left,
-            timestamp=f_cur.timestamp,
-        )
         
-        if self.config.debug:
-            kf_ref.add_image(f_ref.image_left)
-            kf_cur.add_image(f_cur.image_left)
+        kf_ref = KeyFrame.from_frame(f_ref)
+        kf_cur = KeyFrame.from_frame(f_cur)
 
         self.tracking.map.add_keyframe(kf_ref)
         self.tracking.map.add_keyframe(kf_cur)
-        
+
         num_points_added = 0
-        if feature_result is not None:
+        
+        feature_results = feature_results or []
+        num_cams = len(points_3d_list)
+        
+        for cam_idx in range(num_cams):
+            pts_3d = points_3d_list[cam_idx]
+            feat_res = feature_results[cam_idx] if cam_idx < len(feature_results) else None
 
-            img_ref = f_ref.image_left
+            if pts_3d is None or len(pts_3d) == 0:
+                self.logger.warning(f"[Initializer] Камера {cam_idx}: нет 3D-точек для добавления.")
+                continue
 
-            for i, (idx_cur, idx_ref) in enumerate(zip(feature_result.idxs1, feature_result.idxs2)):
-                if i >= len(pts_3d):
-                    break
+            img_ref = f_ref.get_image(cam_idx)
+            kps_ref = f_ref.get_keypoints(cam_idx)
+            # kps_cur = f_cur.get_keypoints(cam_idx)
 
-                p3d = pts_3d[i]
+            if feat_res is None:
+                for p3d in pts_3d:
+                    mp = MapPoint(position=p3d)
+                    self.tracking.map.add_map_point(mp)
+                    num_points_added += 1
+                continue
+
+            for i, p3d in enumerate(pts_3d):
+                if i >= len(feat_res.idxs1) or i >= len(feat_res.idxs2):
+                    mp = MapPoint(position=p3d)
+                    self.tracking.map.add_map_point(mp)
+                    num_points_added += 1
+                    continue
+
+                idx_ref = feat_res.idxs2[i]
+                idx_cur = feat_res.idxs1[i]
+
                 color = None
-                if img_ref is not None:
-                    u, v = np.round(feature_result.kps2_matched[i]).astype(int)
+                if img_ref is not None and len(kps_ref) > idx_ref:
+                    u, v = np.round(kps_ref[idx_ref].pt).astype(int)
                     if 0 <= v < img_ref.shape[0] and 0 <= u < img_ref.shape[1]:
                         color = img_ref[v, u].astype(np.float32)
 
                 mp = MapPoint(position=p3d, color=color)
                 self.tracking.map.add_map_point(mp)
 
-                kf_ref.add_point_match(mp, idx_ref)
-                kf_cur.add_point_match(mp, idx_cur)
-                mp.add_observation(kf_ref.id, idx_ref)
-                mp.add_observation(kf_cur.id, idx_cur)
+                kf_ref.add_map_point(idx_ref, mp)
+                kf_cur.add_map_point(idx_cur, mp)
 
                 num_points_added += 1
-        else:
-            for p in pts_3d:
-                mp = MapPoint(position=p)
-                self.tracking.map.add_map_point(mp)
-                num_points_added += 1
-
-        self.initialized = True
-        
-        self.tracking.last_frame = f_ref
-        self.tracking.current_frame = f_cur
-        self.tracking.reference_keyframe = kf_ref
-        
-        self.frames.clear()
 
         self.logger.info(
             f"[Initializer] Добавлено {num_points_added} 3D точек. "
-            f"KeyFrames: {kf_ref.id}, {kf_cur.id}"
+            f"KeyFrames: {kf_ref.keyframe_id}, {kf_cur.keyframe_id}"
         )
 
+        mean_err_before_optimize = self.tracking.map.compute_mean_reprojection_error(
+            camera=self.camera,
+            keyframes=[kf_cur]
+        )
+        self.logger.info(f"[Initializer] Средняя ошибка до оптимизации: {mean_err_before_optimize:.3f}px")
         self._optimize()
-        
-        # self._normalize_map_scale()
+
+        mean_err_after_optimize = self.tracking.map.compute_mean_reprojection_error(
+            camera=self.camera,
+            keyframes=[kf_cur]
+        )
+        self.logger.info(f"[Initializer] Средняя ошибка после оптимизации: {mean_err_after_optimize:.3f}px")
+
+        self._normalize_map_scale()
+
+        self.initialized = True        
+        self.tracking.last_frame = f_ref
+        self.tracking.current_frame = f_cur
+        self.tracking.reference_keyframe = kf_ref        
+        self.frames.clear()
 
         self.logger.info("[Initializer] Инициализация завершена успешно.\n")
         
@@ -368,6 +374,10 @@ class Initializer:
         min_ratio: float = 1.0,
         max_ratio: float = 100.0
     ):
+        """
+        Нормализует масштаб карты после инициализации.
+        Масштабируется так, чтобы медианная глубина 3D-точек ≈ 1.0.
+        """
         keyframes = self.tracking.map.get_keyframes()
         points = self.tracking.map.get_points()
 
@@ -375,32 +385,38 @@ class Initializer:
             self.logger.warning("[Initializer] Недостаточно данных для нормализации карты.")
             return
 
-        # --- 1. Выбираем два крайних keyframe (обычно первые два) ---
+        # --- 1. Выбираем крайние кадры (первые два по времени) ---
         kf_ref = min(keyframes, key=lambda kf: kf.timestamp)
         kf_cur = max(keyframes, key=lambda kf: kf.timestamp)
 
-        # --- 2. Собираем все глубины (z) 3D-точек ---
+        # --- 2. Собираем валидные 3D-точки ---
         positions = np.array([p.position for p in points if p.is_valid()])
         if len(positions) == 0:
             self.logger.warning("[Initializer] Нет валидных 3D-точек для нормализации.")
             return
 
         median_depth = np.median(positions[:, 2])
-        baseline = np.linalg.norm(kf_cur.get_camera_center() - kf_ref.get_camera_center())
+
+        # --- 3. Вычисляем baseline между двумя ключевыми кадрами ---
+        center_ref = kf_ref.twc   # мировая позиция центра ref
+        center_cur = kf_cur.twc   # мировая позиция центра cur
+        baseline = np.linalg.norm(center_cur - center_ref)
+
         ratio_depth_baseline = median_depth / (baseline + 1e-6)
 
         self.logger.info(
-            f"[Initializer] До нормализации: median_depth={median_depth:.3f}, "
-            f"baseline={baseline:.3f}, ratio={ratio_depth_baseline:.2f}"
+            f"[Initializer] До нормализации: "
+            f"median_depth={median_depth:.3f}, baseline={baseline:.3f}, "
+            f"ratio={ratio_depth_baseline:.2f}"
         )
 
         if ratio_depth_baseline > max_ratio or ratio_depth_baseline < min_ratio:
             self.logger.warning(
-                f"[Initializer] Некорректное соотношение depth/baseline ({ratio_depth_baseline:.2f}), "
-                f"масштаб может быть неверным."
+                f"[Initializer] Некорректное соотношение depth/baseline ({ratio_depth_baseline:.2f}). "
+                f"Масштаб может быть неверным."
             )
 
-        # --- 3. Нормализуем, если глубина не вырождена ---
+        # --- 4. Нормализуем масштаб, если глубина допустима ---
         if median_depth > 1e-6:
             scale = 1.0 / median_depth
 
@@ -410,15 +426,19 @@ class Initializer:
 
             # Масштабируем трансляцию всех keyframe
             for kf in keyframes:
-                kf.pose[:3, 3] *= scale
+                kf.update_translation(kf.pose.t * scale)
+
+            new_baseline = np.linalg.norm(
+                kf_cur.pose.inverse().t - kf_ref.pose.inverse().t
+            )
 
             self.logger.info(
                 f"[Initializer] Масштаб применён: {scale:.3f}. "
-                f"После нормализации baseline={baseline*scale:.3f}, "
-                f"median_depth≈1.0"
+                f"После нормализации baseline={new_baseline:.3f}, median_depth≈1.0"
             )
         else:
             self.logger.warning("[Initializer] Медианная глубина близка к нулю, нормализация пропущена.")
+
 
     
     def _optimize(self):
@@ -426,7 +446,7 @@ class Initializer:
         
         self.logger.info("[Initializer] Начали оптимизацию")
         
-        
+        self.tracking.map.optimize_initial(optimizer=self.tracking.optimizer)
         
         self.logger.info("[Initializer] Закончили оптимизацию")
         pass

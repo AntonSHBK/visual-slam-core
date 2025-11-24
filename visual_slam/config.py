@@ -46,13 +46,15 @@ class MappingConfig:
     keyframe_insertion_thresh: float = 0.6
     extra: Dict[str, Any] = field(default_factory=dict)
 
+@dataclass
+class OptimizationConfig:
+    lr: float = 1e-3
+    n_iter: int = 150
 
 @dataclass
 class LoopClosingConfig:
-    enable: bool = True
-    vocab_file: str = "ORBvoc.txt"
-    extra: Dict[str, Any] = field(default_factory=dict)
-    
+    pass
+
 @dataclass
 class AdditionalParamsConfig:
     ransac_threshold: float = 1.0
@@ -64,6 +66,7 @@ class Config:
     features: FeatureConfig = field(default_factory=FeatureConfig)
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
     mapping: MappingConfig = field(default_factory=MappingConfig)
+    optimization: OptimizationConfig = field(default_factory=OptimizationConfig)
     loop_closing: LoopClosingConfig = field(default_factory=LoopClosingConfig)
     additional_params: AdditionalParamsConfig = field(default_factory=AdditionalParamsConfig)
     

@@ -151,7 +151,7 @@ class MapVisualizer:
 
         for kf in kfs:
             geom = self._create_camera_frustum()
-            T = np.linalg.inv(kf.pose)
+            T = kf.Twc
 
             geom.transform(T)
             geom.paint_uniform_color([1, 0, 0])

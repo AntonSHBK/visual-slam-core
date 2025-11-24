@@ -1,5 +1,6 @@
 
 import math
+from typing import Tuple
 
 import numpy as np
 import cv2
@@ -11,14 +12,10 @@ from scipy.spatial.transform import Rotation
 # Угловые операции на окружности S1
 # ------------------------------
 
-@njit
 def s1_diff_deg(angle1: float, angle2: float) -> float:
     """
     Разница между углами (в градусах) на окружности S1.
     Возвращает значение в диапазоне [-180, 180].
-
-    Пример:
-        s1_diff_deg(350, 10) -> -20
     """
     diff = (angle1 - angle2) % 360.0
     if diff > 180.0:
@@ -26,14 +23,9 @@ def s1_diff_deg(angle1: float, angle2: float) -> float:
     return diff
 
 
-@njit
 def s1_dist_deg(angle1: float, angle2: float) -> float:
     """
     Положительное расстояние между углами (в градусах) на окружности S1.
-    Результат в [0, 180].
-
-    Пример:
-        s1_dist_deg(350, 10) -> 20
     """
     diff = (angle1 - angle2) % 360.0
     if diff > 180.0:
@@ -44,14 +36,10 @@ def s1_dist_deg(angle1: float, angle2: float) -> float:
 k2pi = 2.0 * math.pi
 
 
-@njit
 def s1_diff_rad(angle1: float, angle2: float) -> float:
     """
     Разница между углами (в радианах) на окружности S1.
     Возвращает значение в диапазоне [-pi, pi].
-
-    Пример:
-        s1_diff_rad(6.1, 0.1) -> -0.283...
     """
     diff = (angle1 - angle2) % k2pi
     if diff > math.pi:
@@ -59,14 +47,10 @@ def s1_diff_rad(angle1: float, angle2: float) -> float:
     return diff
 
 
-@njit
 def s1_dist_rad(angle1: float, angle2: float) -> float:
     """
     Положительное расстояние между углами (в радианах) на окружности S1.
     Результат в [0, pi].
-
-    Пример:
-        s1_dist_rad(6.1, 0.1) -> 0.283...
     """
     diff = (angle1 - angle2) % k2pi
     if diff > math.pi:
@@ -78,7 +62,6 @@ def s1_dist_rad(angle1: float, angle2: float) -> float:
 # Переходы между SE(3), Sim(3) и матрицами
 # ------------------------------
 
-# @njit
 def poseRt(R: np.ndarray, t: np.ndarray) -> np.ndarray:
     """
     Собрать SE(3) матрицу из R (3x3) и t (3,).
@@ -89,7 +72,6 @@ def poseRt(R: np.ndarray, t: np.ndarray) -> np.ndarray:
     return T
 
 
-@njit
 def inv_poseRt(R: np.ndarray, t: np.ndarray) -> np.ndarray:
     """
     Инвертировать SE(3), заданное R (3x3) и t (3,).
@@ -101,7 +83,6 @@ def inv_poseRt(R: np.ndarray, t: np.ndarray) -> np.ndarray:
     return T
 
 
-@njit
 def inv_T(T: np.ndarray) -> np.ndarray:
     """
     Инвертировать SE(3), заданное полной матрицей T (4x4).
@@ -113,124 +94,10 @@ def inv_T(T: np.ndarray) -> np.ndarray:
     ret[:3, 3] = -R_T @ np.ascontiguousarray(t)
     return ret
 
-
-# ------------------------------
-# Класс Sim3Pose
-# ------------------------------
-
-class Sim3Pose:
-    """
-    Поза в пространстве Sim(3): (R, t, s).
-    Хранит вращение R, перенос t и масштаб s.
-    """
-
-    def __init__(self, R=np.eye(3), t=np.zeros(3), s=1.0):
-        self.R = np.array(R, dtype=float)
-        self.t = np.array(t, dtype=float).reshape(3, 1)
-        self.s = float(s)
-        assert self.s > 0
-        self._T = None
-        self._inv_T = None
-
-    def __repr__(self):
-        return f"Sim3Pose(R={self.R}, t={self.t.ravel()}, s={self.s})"
-
-    def from_matrix(self, T: np.ndarray):
-        """
-        Инициализация из 4x4 матрицы Sim(3).
-        """
-        R = T[:3, :3]
-        row_norms = np.linalg.norm(R, axis=1)
-        self.s = row_norms.mean()
-        self.R = R / self.s
-        self.t = T[:3, 3].reshape(3, 1)
-        return self
-
-    def from_se3_matrix(self, T: np.ndarray):
-        """
-        Инициализация из SE(3) (без масштаба).
-        """
-        self.s = 1.0
-        self.R = T[:3, :3]
-        self.t = T[:3, 3].reshape(3, 1)
-        return self
-
-    def matrix(self) -> np.ndarray:
-        """
-        Вернуть 4x4 матрицу Sim(3).
-        """
-        if self._T is None:
-            self._T = poseRt(self.R * self.s, self.t.ravel())
-        return self._T
-
-    def inverse(self):
-        """
-        Вернуть обратную позу Sim(3).
-        """
-        return Sim3Pose(self.R.T,
-                        -1.0 / self.s * self.R.T @ self.t,
-                        1.0 / self.s)
-
-    def inverse_matrix(self) -> np.ndarray:
-        """
-        Вернуть обратную матрицу 4x4.
-        """
-        if self._inv_T is None:
-            self._inv_T = np.eye(4)
-            sR_inv = 1.0 / self.s * self.R.T
-            self._inv_T[:3, :3] = sR_inv
-            self._inv_T[:3, 3] = -sR_inv @ self.t.ravel()
-        return self._inv_T
-
-    def to_se3_matrix(self) -> np.ndarray:
-        """
-        Преобразовать в SE(3) матрицу (масштаб вынесен в t).
-        """
-        return poseRt(self.R, self.t.squeeze() / self.s)
-
-    def copy(self):
-        return Sim3Pose(self.R.copy(), self.t.copy(), self.s)
-
-    def map(self, p3d: np.ndarray) -> np.ndarray:
-        """
-        Отобразить одну 3D-точку.
-        """
-        return self.s * self.R @ p3d.reshape(3, 1) + self.t
-
-    def map_points(self, points: np.ndarray) -> np.ndarray:
-        """
-        Отобразить массив 3D-точек (N,3).
-        """
-        return (self.s * self.R @ points.T + self.t).T
-
-    def __matmul__(self, other):
-        """
-        Перегрузка оператора @ для композиции поз.
-        """
-        if isinstance(other, Sim3Pose):
-            s_res = self.s * other.s
-            R_res = self.R @ other.R
-            t_res = self.s * self.R @ other.t + self.t
-            return Sim3Pose(R_res, t_res, s_res)
-        elif isinstance(other, np.ndarray) and other.shape == (4, 4):
-            R_other = other[:3, :3]
-            row_norms = np.linalg.norm(R_other, axis=1)
-            s_other = row_norms.mean()
-            R_other = R_other / s_other
-            t_other = other[:3, 3].reshape(3, 1)
-            s_res = self.s * s_other
-            R_res = self.R @ R_other
-            t_res = self.s * self.R @ t_other + self.t
-            return Sim3Pose(R_res, t_res, s_res)
-        else:
-            raise TypeError(f"Unsupported operand for @: {type(other)}")
-
-
 # ------------------------------
 # Нормализация векторов
 # ------------------------------
 
-@njit
 def normalize_vector(v: np.ndarray):
     """
     Нормализация вектора.
@@ -240,19 +107,6 @@ def normalize_vector(v: np.ndarray):
     if norm < 1e-10:
         return v, norm
     return v / norm, norm
-
-
-@njit
-def normalize_vector2(v: np.ndarray):
-    """
-    Нормализация вектора.
-    Возвращает только нормализованный вектор.
-    """
-    norm = np.linalg.norm(v)
-    if norm < 1e-10:
-        return v
-    return v / norm
-
 
 # ------------------------------
 # Добавление единички для перехода в однородные координаты
@@ -315,7 +169,6 @@ def skew(w: np.ndarray) -> np.ndarray:
     return np.array([[0, -wz, wy],
                      [wz, 0, -wx],
                      [-wy, wx, 0]])
-
 
 @njit
 def hamming_distance(a: np.ndarray, b: np.ndarray) -> int:
@@ -559,3 +412,59 @@ def homography_matrix(img: np.ndarray,
                     [0.0, 0.0, ty],
                     [0.0, 0.0, tz]]) / d
     return K @ (Rcw - t_n) @ Kinv
+
+
+@njit()
+def transform_points_numba(
+    points_w: np.ndarray, 
+    Rcw: np.ndarray, 
+    tcw: np.ndarray
+) -> np.ndarray:
+    N = points_w.shape[0]
+    points_c = np.empty_like(points_w)
+    for i in range(N):
+        px, py, pz = points_w[i, 0], points_w[i, 1], points_w[i, 2]
+        points_c[i, 0] = Rcw[0, 0]*px + Rcw[0, 1]*py + Rcw[0, 2]*pz + tcw[0]
+        points_c[i, 1] = Rcw[1, 0]*px + Rcw[1, 1]*py + Rcw[1, 2]*pz + tcw[1]
+        points_c[i, 2] = Rcw[2, 0]*px + Rcw[2, 1]*py + Rcw[2, 2]*pz + tcw[2]
+    return points_c
+
+def compute_reprojection_error(
+    points_3d: np.ndarray,
+    points_2d: np.ndarray,
+    K: np.ndarray,
+    R: np.ndarray,
+    t: np.ndarray
+) -> Tuple[np.ndarray, float]:
+    """
+    Вычисляет покомпонентную и среднюю репроекционную ошибку.
+
+    Args:
+        points_3d (np.ndarray): Массив 3D-точек формы (N, 3) в мировой системе координат.
+        points_2d (np.ndarray): Соответствующие 2D-точки (N, 2) в пикселях.
+        K (np.ndarray): Матрица внутренних параметров камеры (3×3).
+        R (np.ndarray): Матрица вращения (3×3), преобразование из мира в камеру.
+        t (np.ndarray): Вектор переноса (3,) для той же системы преобразования.
+
+    Returns:
+        Tuple[np.ndarray, float]:
+            - errors: вектор ошибок репроекции (N,)
+            - mean_error: средняя ошибка (float)
+    """
+
+    # 1. Проекция 3D-точек в систему координат камеры
+    pts_cam = (R @ points_3d.T + t.reshape(3, 1)).T
+
+    # 2. Переход к нормализованным координатам
+    pts_norm = pts_cam[:, :2] / pts_cam[:, 2:].clip(min=1e-8)
+
+    # 3. Применение матрицы камеры для перехода в пиксели
+    homog = np.concatenate([pts_norm, np.ones((pts_norm.shape[0], 1))], axis=1)
+    proj = (K @ homog.T).T
+    proj_2d = proj[:, :2]
+
+    # 4. Вычисление евклидовой ошибки (в пикселях)
+    errors = np.linalg.norm(points_2d - proj_2d, axis=1)
+    mean_error = float(np.mean(errors))
+
+    return errors, mean_error
