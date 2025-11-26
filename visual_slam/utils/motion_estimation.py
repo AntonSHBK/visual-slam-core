@@ -13,40 +13,19 @@ def estimate_motion_from_2d2d(
     pts_cur: np.ndarray,
     ransac_thresh: float = 0.003,
     prob: float = 0.999,
-    logger=None
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], int, Optional[np.ndarray]]:
+) -> Tuple[np.ndarray, np.ndarray, int, np.ndarray]:
     """
     Оценка относительного движения камеры по нормализованным 2D-точкам (через Essential Matrix).
     Используется нормализованная система координат камеры (f=1, pp=(0,0)).
-
-    Параметры
-    ----------
-    pts_ref : (N,2)
-        Точки на предыдущем кадре (в нормализованных координатах).
-    pts_cur : (N,2)
-        Точки на текущем кадре (в нормализованных координатах).
-    ransac_thresh : float, optional
-        Порог ошибки репроекции в нормализованных единицах (~0.001–0.01).
-    prob : float, optional
-        Вероятность успеха RANSAC (по умолчанию 0.999).
-
-    Возвращает
-    ----------
-    R : (3,3)
-        Матрица вращения между кадрами.
-    t : (3,1)
-        Вектор переноса (нормированный, ||t||=1).
-    inliers : int
-        Количество инлайеров, найденных RANSAC.
-    mask : np.ndarray
-        Маска инлайеров (булев массив длиной N).
     """
     if pts_ref.shape[0] < 5 or pts_cur.shape[0] < 5:
         return None, None, 0, None
 
     ransac_method = getattr(cv2, "USAC_MSAC", cv2.RANSAC)
+    
     E, mask = cv2.findEssentialMat(
-        pts_cur, pts_ref,
+        points1=pts_ref,
+        points2=pts_cur,
         focal=1.0, pp=(0.0, 0.0),
         method=ransac_method,
         prob=prob,
@@ -57,14 +36,18 @@ def estimate_motion_from_2d2d(
         return None, None, 0, None
 
     inliers, R, t, mask_pose = cv2.recoverPose(
-        E, pts_cur, pts_ref,
-        focal=1.0, pp=(0.0, 0.0), mask=mask
+        E=E,
+        points1=pts_ref, 
+        points2=pts_cur,
+        focal=1.0, 
+        pp=(0.0, 0.0), 
+        mask=mask
     )
 
     if inliers is None or inliers < 5:
         return None, None, 0, mask_pose
 
-    return R, t, int(inliers), mask_pose
+    return R, t.reshape(3, 1), int(inliers), mask_pose
 
 
 # ============================================================
@@ -154,104 +137,44 @@ def estimate_motion_from_2d3d(
 # ============================================================
 
 def triangulate_points(
-    K: np.ndarray,
-    R: np.ndarray,
-    t: np.ndarray,
-    pts1: np.ndarray,
-    pts2: np.ndarray,
+    T_w2c_ref: np.ndarray,
+    T_w2c_cur: np.ndarray,
+    pts_ref_n: np.ndarray,
+    pts_cur_n: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    Триангуляция 3D-точек из двух наборов 2D-точек (в пикселях).
+    Триангуляция 3D-точек в глобальной системе координат.
 
-    Использует внутреннюю матрицу K, то есть точки подаются в пиксельных координатах.
+    Параметры
+    ---------
+    T_w2c_ref : (4×4)
+        Поза ref-камеры: глобальная → локальная камера.
+    T_w2c_cur : (4×4)
+        Поза cur-камеры: глобальная → локальная камера.
+    pts_ref_n : (N×2)
+        Нормализованные координаты точек (ref).
+    pts_cur_n : (N×2)
+        Нормализованные координаты точек (cur).
 
-    Parameters
+    Возвращает
     ----------
-    K : np.ndarray (3x3)
-        Матрица внутренних параметров камеры.
-    R : np.ndarray (3x3)
-        Вращение между первой и второй камерой.
-    t : np.ndarray (3x1)
-        Перенос между первой и второй камерой.
-    pts1 : np.ndarray (N,2)
-        Точки на первом изображении (в пикселях).
-    pts2 : np.ndarray (N,2)
-        Точки на втором изображении (в пикселях).
-
-    Returns
-    -------
-    pts_3d : np.ndarray (N,3)
-        Триангулированные 3D-точки.
-    mask_valid : np.ndarray (N,)
-        Булева маска точек с ненулевой однородной координатой (w != 0).
+    pts3_world : (N×3)
+        Триангулированные точки в глобальной системе координат.
+    mask_valid : (N,)
+        Булева маска валидных точек.
     """
-    # Матрицы проекций
-    P1 = K @ np.hstack((np.eye(3), np.zeros((3, 1))))
-    P2 = K @ np.hstack((R, t))
 
-    # Триангуляция
-    pts_4d = cv2.triangulatePoints(P1, P2, pts1.T, pts2.T)
+    P1 = T_w2c_ref[:3, :]
+    P2 = T_w2c_cur[:3, :]
 
-    # Маска: w != 0
-    mask_valid = np.abs(pts_4d[3]) > 1e-8
-    
-    # mask_valid = (
-    #     (pts_3d[:, 2] > 0) &
-    #     # (pts_3d[:, 2] < 100.0) &  # опционально
-    #     np.isfinite(pts_3d[:, 2])
-    # )
+    pts4 = cv2.triangulatePoints(P1, P2, pts_ref_n.T, pts_cur_n.T)
 
-    # Преобразуем в неомогенные координаты
-    pts_3d = (pts_4d[:3] / pts_4d[3]).T
+    w = pts4[3]
+    mask_valid = np.abs(w) > 1e-9
 
-    return pts_3d, mask_valid
+    pts3_world = (pts4[:3] / w).T
 
-import numpy as np
-import cv2
-
-
-def triangulate_normalized_points(
-    pose_1w: np.ndarray,
-    pose_2w: np.ndarray,
-    pts_1: np.ndarray,
-    pts_2: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Триангуляция 3D-точек из нормализованных координат и поз камер
-    (аналог PySLAM: triangulate_normalized_points).
-
-    Parameters
-    ----------
-    pose_1w : np.ndarray (4x4)
-        Поза первой камеры в мировой системе (T_1w = [R1|t1]).
-    pose_2w : np.ndarray (4x4)
-        Поза второй камеры в мировой системе (T_2w = [R2|t2]).
-    pts_1 : np.ndarray (N,2)
-        Нормализованные координаты (x/z, y/z) первой камеры.
-    pts_2 : np.ndarray (N,2)
-        Нормализованные координаты (x/z, y/z) второй камеры.
-
-    Returns
-    -------
-    points_3d : np.ndarray (N,3)
-        Триангулированные 3D-точки в мировой системе координат.
-    mask_valid : np.ndarray (N,)
-        Булева маска для точек, у которых w != 0.
-    """
-    # Матрицы проекций (используем только [R|t] без K)
-    P1w = pose_1w[:3, :]
-    P2w = pose_2w[:3, :]
-
-    # Триангуляция
-    points_4d_hom = cv2.triangulatePoints(P1w, P2w, pts_1.T, pts_2.T)
-
-    # Маска валидных точек (ненулевая однородная координата)
-    mask_valid = np.abs(points_4d_hom[3]) > 1e-8
-
-    # Декартовы координаты (x, y, z)
-    points_3d = (points_4d_hom[:3] / points_4d_hom[3]).T
-
-    return points_3d, mask_valid
+    return pts3_world, mask_valid
 
 
     
@@ -280,55 +203,30 @@ def compute_normalize_parallax(
     pts_ref_n: np.ndarray,
     pts_cur_n: np.ndarray,
     pose_ref: np.ndarray,
-    pose_cur: np.ndarray,
+    pose_cur: np.ndarray
 ) -> float:
-    """
-    Вычисление среднего угла параллакса (в градусах) между нормализованными направлениями лучей
-    двух кадров, используя их позы (4x4 SE3).
 
-    Параметры
-    ----------
-    pts_ref_n : (N,2)
-        Точки на предыдущем кадре (в нормализованных координатах).
-    pts_cur_n : (N,2)
-        Точки на текущем кадре (в нормализованных координатах).
-    pose_ref : (4,4)
-        Поза эталонного кадра (T_ref: камера→мир или ref→world).
-    pose_cur : (4,4)
-        Поза текущего кадра (T_cur: камера→мир или cur→world).
-
-    Возвращает
-    ----------
-    parallax_deg : float
-        Медианный угол между направлениями лучей (в градусах).
-    """
     if pts_ref_n.shape[0] == 0 or pts_cur_n.shape[0] == 0:
         return 0.0
 
-    # 1. Направления лучей в 3D (z=1)
     v_ref = np.hstack([pts_ref_n, np.ones((len(pts_ref_n), 1))])
     v_cur = np.hstack([pts_cur_n, np.ones((len(pts_cur_n), 1))])
 
-    # 2. Вычисляем относительное вращение между позами
-    # ΔR = R_ref^T * R_cur
-    R_ref = pose_ref[:3, :3]
-    R_cur = pose_cur[:3, :3]
+    R_ref = pose_ref[:3, :3]   # world→ref
+    R_cur = pose_cur[:3, :3]   # world→cur
+
     R_rel = R_ref.T @ R_cur
 
-    # 3. Преобразуем лучи текущего кадра в систему координат предыдущего
-    v_cur_in_ref = (R_rel @ v_cur.T).T
+    v_cur_in_ref = (R_rel.T @ v_cur.T).T
 
-    # 4. Нормализация векторов
     v_ref /= np.linalg.norm(v_ref, axis=1, keepdims=True)
     v_cur_in_ref /= np.linalg.norm(v_cur_in_ref, axis=1, keepdims=True)
 
-    # 5. Углы между направлениями
     cos_angles = np.einsum("ij,ij->i", v_ref, v_cur_in_ref)
     cos_angles = np.clip(cos_angles, -1.0, 1.0)
     angles_rad = np.arccos(cos_angles)
     angles_deg = np.degrees(angles_rad)
 
-    # 6. Возвращаем медиану (устойчивую оценку параллакса)
     return float(np.median(angles_deg))
 
 
@@ -540,3 +438,56 @@ def triangulate_stereo_points(
 
 def image_to_gray(img):
     return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+
+def filter_points_by_depth(
+    points_3d: np.ndarray,
+    T_w2c_ref: np.ndarray,
+    T_w2c_cur: np.ndarray,
+    min_depth: float = 0.1,
+    max_depth: float = 50.0
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Фильтрация точек по глубине относительно двух камер (ref и cur).
+
+    Параметры
+    ---------
+    points_3d : (N,3)
+        Точки в глобальной системе координат.
+    T_w2c_ref : (4×4)
+        Поза ref-камеры: глобальная → локальная камера.
+    T_w2c_cur : (4×4)
+        Поза cur-камеры: глобальная → локальная камера.
+    min_depth : float
+        Минимальная допустимая глубина.
+    max_depth : float
+        Максимальная допустимая глубина.
+
+    Возвращает
+    ----------
+    points_filtered : (M, 3)
+        Точки, прошедшие фильтрацию.
+    mask : (N,)
+        Булева маска валидных точек.
+    """
+
+    # Преобразуем точки в систему координат ref-камеры
+    R_ref = T_w2c_ref[:3, :3]
+    t_ref = T_w2c_ref[:3, 3]
+    pts_ref = (R_ref @ points_3d.T + t_ref.reshape(3,1)).T
+    depth_ref = pts_ref[:, 2]
+
+    # Преобразуем точки в систему координат cur-камеры
+    R_cur = T_w2c_cur[:3, :3]
+    t_cur = T_w2c_cur[:3, 3]
+    pts_cur = (R_cur @ points_3d.T + t_cur.reshape(3,1)).T
+    depth_cur = pts_cur[:, 2]
+
+    # Условия глубины в обеих камерах
+    mask = (
+        (depth_ref > min_depth) & (depth_ref < max_depth) &
+        (depth_cur > min_depth) & (depth_cur < max_depth)
+    )
+
+    points_filtered = points_3d[mask]
+    return points_filtered, mask

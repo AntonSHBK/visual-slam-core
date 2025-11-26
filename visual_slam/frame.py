@@ -62,32 +62,34 @@ class FrameBase:
             self._pose = new_pose.copy()
     
     @property
-    def Tcw(self) -> np.ndarray:
+    # мир относительно камеры
+    def T_w2c(self) -> np.ndarray:
         with self._lock_pose:
             return self._pose.T.copy()
 
     @property
-    def Twc(self) -> np.ndarray:
+    # камера относительно мира
+    def T_c2w(self) -> np.ndarray:
         with self._lock_pose:
             return self._pose.inverse().T.copy()
 
     @property
-    def Rcw(self) -> np.ndarray:
+    def R_w2c(self) -> np.ndarray:
         with self._lock_pose:
             return self._pose.R.copy()
 
     @property
-    def Rwc(self) -> np.ndarray:
+    def R_c2w(self) -> np.ndarray:
         with self._lock_pose:
             return self._pose.inverse().R.copy()
 
     @property
-    def tcw(self) -> np.ndarray:
+    def t_w2c(self) -> np.ndarray:
         with self._lock_pose:
             return self._pose.t.copy()
     
     @property
-    def twc(self) -> np.ndarray:
+    def t_c2w(self) -> np.ndarray:
         with self._lock_pose:
             return self._pose.inverse().t.copy()    
 
@@ -110,7 +112,7 @@ class FrameBase:
             return self._pose.euler_deg.copy()
 
     # ------------------------------
-    # Методы обновления позы
+    # Методы обновления позы, всё в локальной системе
     # ------------------------------
 
     def update_pose(self, T: np.ndarray):
@@ -143,13 +145,13 @@ class FrameBase:
     def transform_point(self, point_w: np.ndarray) -> np.ndarray:
         """Преобразовать точку в глобальной СК в координаты камеры."""
         with self._lock_pose:
-            return self.Rcw @ point_w + self.tcw
+            return self.R_w2c @ point_w + self.t_w2c
 
     def transform_points(self, points_w: np.ndarray) -> np.ndarray:
         """Преобразовать массив точек (Nx3) в систему координат камеры."""
         with self._lock_pose:
-            Rcw = self.Rcw
-            tcw = self.tcw
+            Rcw = self.R_w2c
+            tcw = self.t_w2c
         points_w = np.ascontiguousarray(points_w)
         
         if points_w.shape[0] < 500:
@@ -200,7 +202,7 @@ class FrameBase:
 
         # Центр камеры (Ow) в мировой системе
         with self._lock_pose:
-            Ow = self.twc
+            Ow = self.t_c2w
 
         # Вектор от камеры к точке
         PO = map_point.position - Ow
@@ -215,7 +217,7 @@ class FrameBase:
         # и направлением на точку (в мировой СК)
         # Для этого получаем направление взгляда камеры в мировой системе:
         with self._lock_pose:
-            Rwc = self.Rwc
+            Rwc = self.R_c2w
             view_dir = Rwc[:, 2]
 
         cos_view = np.dot(view_dir, normal)
@@ -241,8 +243,8 @@ class FrameBase:
         uvs, zs = self.project_points(points)
 
         with self._lock_pose:
-            Ow = self.twc
-            Rwc = self.Rwc
+            Ow = self.t_c2w
+            Rwc = self.R_c2w
             view_dir = Rwc[:, 2]
 
         # Векторы от камеры к точкам
@@ -398,4 +400,4 @@ class Frame(FrameBase):
             return self._pose.as_matrix()
 
     def __repr__(self):
-        return f"<Frame id={self.id}, kps={self.num_keypoints()}, time={self.timestamp:.3f}, pose t={self.tcw.round(3)}, R=\n{self.Rcw.round(3)}>"
+        return f"<Frame id={self.id}, kps={self.num_keypoints()}, time={self.timestamp:.3f}, pose t={self.t_w2c.round(3)}, R=\n{self.R_w2c.round(3)}>"

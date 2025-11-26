@@ -4,27 +4,29 @@ import logging
 from logging.handlers import RotatingFileHandler
 
 
-def _create_logger(name: str, log_dir: Path, log_file: str, log_level: str, max_bytes: int, backup_count: int):
-    """Вспомогательная функция для создания именованных логгеров."""
+def _create_logger_handler(
+    log_dir: Path,
+    log_file: str,
+    log_level: str,
+    max_bytes: int,
+    backup_count: int,
+) -> logging.Handler:
+    """Создаёт и настраивает file handler — без добавления в логгер."""
     formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    logger = logging.getLogger(name)
-    logger.setLevel(log_level)
-
-    file_handler = RotatingFileHandler(
+    handler = RotatingFileHandler(
         log_dir / log_file,
         maxBytes=max_bytes,
         backupCount=backup_count,
-        encoding="utf-8"
+        encoding="utf-8",
     )
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
+    handler.setFormatter(formatter)
+    handler.setLevel(log_level)
 
-    return logger
-
+    return handler
 
 def setup_logging(log_dir: Path = Path("logs"), log_level: str = "INFO"):
     """Настройка базового логирования и стандартных логгеров."""
@@ -59,18 +61,36 @@ def setup_logging(log_dir: Path = Path("logs"), log_level: str = "INFO"):
     # API и Model логгеры
     # _create_logger("api", log_dir, "api.log", log_level, max_bytes=5 * 1024 * 1024, backup_count=3).propagate = True
 
-
-def get_logger(name: str, log_dir: Path = Path("logs"), log_file: str | None = None, log_level: str = "INFO"):
-    """
-    Создаёт или возвращает именованный логгер.
-    Если указан log_file, логи будут писаться в отдельный файл.
-    """
+def get_logger(
+    name: str,
+    log_dir: Path = Path("logs"),
+    log_file: str | None = None,
+    log_level: str = "INFO"
+):
     logger = logging.getLogger(name)
     logger.setLevel(log_level.upper())
+    
+    log_dir = Path(log_dir)
 
     if log_file:
-        log_dir = Path(log_dir)
         log_dir.mkdir(parents=True, exist_ok=True)
-        _create_logger(name, log_dir, log_file, log_level.upper(), max_bytes=5 * 1024 * 1024, backup_count=3).propagate = False
+
+        handler_exists = any(
+            isinstance(h, RotatingFileHandler)
+            and h.baseFilename.endswith(log_file)
+            for h in logger.handlers
+        )
+
+        if not handler_exists:
+            handler = _create_logger_handler(
+                log_dir=log_dir,
+                log_file=log_file,
+                log_level=log_level.upper(),
+                max_bytes=5 * 1024 * 1024,
+                backup_count=3
+            )
+            logger.addHandler(handler)
 
     return logger
+
+

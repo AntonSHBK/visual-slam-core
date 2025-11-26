@@ -27,7 +27,12 @@ class FeatureConfig:
     matcher: str = "bf-hamming"
     detector_params: Dict[str, Any] = field(default_factory=dict)
     matcher_params: Dict[str, Any] = field(default_factory=dict)
-    filtered_params: Dict[str, Any] = field(default_factory=dict)    
+    filtered_params: Dict[str, Any] = field(default_factory=dict) 
+    
+@dataclass
+class InitializationConfig:
+    min_depth: float = 0.1
+    max_depth: float = 100.0
 
 @dataclass
 class TrackingConfig:
@@ -38,6 +43,7 @@ class TrackingConfig:
     max_reprojection_error: float = 5.0
     warmup_frames: int = 30
     extra: Dict[str, Any] = field(default_factory=dict)
+    use_ransac: bool = True
 
 
 @dataclass
@@ -64,6 +70,7 @@ class AdditionalParamsConfig:
 class Config:
     camera: CameraConfig = field(default_factory=CameraConfig)
     features: FeatureConfig = field(default_factory=FeatureConfig)
+    initialization: InitializationConfig = field(default_factory=InitializationConfig)
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
     mapping: MappingConfig = field(default_factory=MappingConfig)
     optimization: OptimizationConfig = field(default_factory=OptimizationConfig)
@@ -95,6 +102,8 @@ class Config:
             tracking=TrackingConfig(**data.get("tracking", {})),
             mapping=MappingConfig(**data.get("mapping", {})),
             loop_closing=LoopClosingConfig(**data.get("loop_closing", {})),
+            initialization=InitializationConfig(**data.get("initialization", {})),
+            optimization=OptimizationConfig(**data.get("optimization", {})),
         )
 
     def __repr__(self):
