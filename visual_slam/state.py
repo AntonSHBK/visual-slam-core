@@ -29,10 +29,6 @@ class StateItem:
 
 
 class State:
-    """
-    Класс, содержащий все состояния SLAM/Tracking.
-    """
-
     NO_IMAGES_YET = StateItem(0, "NO_IMAGES_YET", "Нет изображений для обработки")
     NOT_INITIALIZED = StateItem(1, "NOT_INITIALIZED", "Система не инициализирована")
     INITIALIZING = StateItem(2, "INITIALIZING", "Инициализация карты")
@@ -45,9 +41,6 @@ class State:
 
     @classmethod
     def all_states(cls):
-        """
-        Вернуть список всех состояний.
-        """
         return [
             cls.NO_IMAGES_YET,
             cls.NOT_INITIALIZED,
@@ -61,9 +54,6 @@ class State:
 
     @classmethod
     def by_index(cls, idx: int) -> Optional[StateItem]:
-        """
-        Быстрый доступ по индексу.
-        """
         for s in cls.all_states():
             if s.index == idx:
                 return s

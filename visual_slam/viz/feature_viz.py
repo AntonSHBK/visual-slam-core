@@ -24,25 +24,17 @@ class FeatureVisualizer:
         window_name: str = "Keypoints",
         wait_key: bool = True,
     ) -> Optional[np.ndarray]:
+        image = image.copy()
+        
         if image is None or len(keypoints) == 0:
             return None
 
-        # Преобразуем в BGR, если нужно
-        # image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR) if len(image.shape) == 2 else image.copy()
+        red_bgr = (0, 0, 255)
 
-        # Генерируем уникальные цвета для всех точек (градиент по HSV)
-        num_points = len(keypoints)
-        hsv_colors = np.linspace(0, 179, num_points, dtype=np.uint8)  # Hue от 0 до 179 (OpenCV HSV диапазон)
-        colors = [cv2.cvtColor(np.uint8([[[h, 255, 255]]]), cv2.COLOR_HSV2BGR)[0, 0].tolist()
-                for h in hsv_colors]
-
-        # Рисуем точки с уникальными цветами
-        for kp, c in zip(keypoints, colors):
+        for kp in keypoints:
             pt = tuple(map(int, kp.pt))
-            color_bgr = tuple(map(int, c))  # (B, G, R)
-            cv2.circle(image, pt, radius, color_bgr, thickness=-1)
+            cv2.circle(image, pt, radius, red_bgr, thickness=-1)
 
-        # Визуализация
         if self.show:
             win_name = f"{self.window_name_prefix} - {window_name}"
             cv2.imshow(win_name, image)
@@ -54,6 +46,7 @@ class FeatureVisualizer:
                 cv2.waitKey(1)
 
         return image
+
 
     # ==============================================================
     # Визуализация матчей с разными цветами
@@ -129,39 +122,3 @@ class FeatureVisualizer:
         return out_img
 
 
-    # ==============================================================
-    # Сетка покрытия фич
-    # ==============================================================
-    def draw_feature_grid(
-        self,
-        image: np.ndarray,
-        grid_size: tuple = (3, 3),
-        color: tuple = (255, 0, 0),
-        thickness: int = 1,
-        window_name: str = "Feature Coverage",
-        wait_key: bool = True,
-    ) -> Optional[np.ndarray]:
-        if image is None:
-            return None
-
-        image_vis = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR) if len(image.shape) == 2 else image.copy()
-        h, w = image_vis.shape[:2]
-        gw, gh = grid_size
-        step_x, step_y = w // gw, h // gh
-
-        for i in range(1, gw):
-            cv2.line(image_vis, (i * step_x, 0), (i * step_x, h), color, thickness)
-        for j in range(1, gh):
-            cv2.line(image_vis, (0, j * step_y), (w, j * step_y), color, thickness)
-
-        if self.show:
-            win_name = f"{self.window_name_prefix} - {window_name}"
-            cv2.imshow(win_name, image_vis)
-            if wait_key:
-                key = cv2.waitKey(0) & 0xFF
-                if key == ord("q"):
-                    cv2.destroyWindow(win_name)
-            else:
-                cv2.waitKey(1)
-
-        return image_vis

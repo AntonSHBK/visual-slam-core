@@ -98,6 +98,7 @@ class MapVisualizer:
         - глобальные оси координат
         """
         geometries = []
+        cam_scale = 1.0
 
         if show_points:
             points, colors = self._get_points()
@@ -106,7 +107,12 @@ class MapVisualizer:
                 pcd.points = o3d.utility.Vector3dVector(points)
                 pcd.colors = o3d.utility.Vector3dVector(colors)
                 geometries.append(pcd)
-                self.logger.info(f"[show_scene] Добавлено {len(points)} точек карты.")
+
+                cam_scale = self._estimate_scene_scale(points, scale_factor=0.02)
+                self.logger.info(
+                    f"[show_scene] Добавлено {len(points)} точек карты. "
+                    f"Scene scale = {cam_scale:.4f}"
+                )
             else:
                 self.logger.warning("[show_scene] Нет точек для отображения.")
 
@@ -122,10 +128,9 @@ class MapVisualizer:
 
         # --- Оси координат ---
         if show_axes:
-            axis = self._get_axis(size=0.2)
+            axis = self._get_axis(size=cam_scale * 1.0)
             geometries.append(axis)
-            self.logger.info("[show_scene] Добавлены координатные оси.")
-
+            
         # --- Отображение ---
         if geometries:
             o3d.visualization.draw_geometries(geometries)
@@ -143,24 +148,24 @@ class MapVisualizer:
                 colors.append(rng.random(3))
         return np.array(points), np.array(colors)
 
-    def _get_camera_geometries(self, keyframes=None):
-        """Создаёт пирамидки для поз камер."""
+    def _get_camera_geometries(self, keyframes=None, scale=1.0):
+        """Создаёт фрустумы камер для KeyFrame."""
         geometries = []
         kfs = self.map.get_keyframes() if keyframes is None else keyframes
 
         for kf in kfs:
-            geom = self._create_camera_frustum()
-            T = kf.T_c2w
+            cam = self._create_camera_frustum(scale=scale * 5)
 
-            geom.transform(T)
-            geom.paint_uniform_color([1, 0, 0])
-            geometries.append(geom)
+            T = kf.T_c2w
+            cam.transform(T)
+            cam.paint_uniform_color([1.0, 0.0, 0.0])
+
+            geometries.append(cam)
 
         return geometries
 
 
     def _create_camera_frustum(self, scale=1.0):
-        """Создаёт компактный и аккуратный фрустум камеры."""
         w = 0.04 * scale
         h = 0.03 * scale
         z = 0.1 * scale
@@ -210,41 +215,52 @@ class MapVisualizer:
         Отображает:
         - keypoints двух ключевых кадров
         - реальные 3D→2D проекции MapPoints на оба кадра
+        С учётом новой структуры map_points: Dict[(cam_id, kp_idx), MapPoint]
         """
 
-        # --- Проверяем, что есть изображения ---
-        if kf_ref.images is None or kf_cur.images is None:
+        # --- Проверяем изображения ---
+        if not kf_ref.images or not kf_cur.images:
             self.logger.error("[show_matches] Нет изображений в KeyFrame.")
             return None
 
         img_ref = kf_ref.images[0].copy()
         img_cur = kf_cur.images[0].copy()
 
-        if len(img_ref.shape) == 2:
+        if img_ref.ndim == 2:
             img_ref = cv2.cvtColor(img_ref, cv2.COLOR_GRAY2BGR)
-        if len(img_cur.shape) == 2:
+        if img_cur.ndim == 2:
             img_cur = cv2.cvtColor(img_cur, cv2.COLOR_GRAY2BGR)
 
-        # --- Находим общие MapPoints ---
-        shared_matches = []
-        for idx_ref, mp in kf_ref.map_points.items():     # map_points: Dict[kp_idx, mappoint]
+        # ============================================================
+        # 1. Поиск общих MapPoints
+        # ============================================================
+
+        shared_matches = []  
+        # формат: [ ((cam_ref, kp_ref_idx), (cam_cur, kp_cur_idx), mp), ... ]
+
+        for (cam_ref, kp_ref_idx), mp in kf_ref.map_points.items():
             if mp is None or not mp.is_valid():
                 continue
-            # Ищем тот же mappoint в kf_cur
-            for idx_cur, mp2 in kf_cur.map_points.items():
+
+            # ищем это mp в другом KF
+            for (cam_cur, kp_cur_idx), mp2 in kf_cur.map_points.items():
                 if mp2 is mp:
-                    shared_matches.append((idx_ref, idx_cur))
+                    shared_matches.append(
+                        ((cam_ref, kp_ref_idx), (cam_cur, kp_cur_idx), mp)
+                    )
 
         if len(shared_matches) == 0:
             self.logger.warning("[show_matches] Нет общих MapPoints между кадрами.")
             return None
 
-        if max_display:
+        if max_display is not None:
             shared_matches = shared_matches[:max_display]
 
         self.logger.info(f"[show_matches] Совпадений: {len(shared_matches)}")
 
-        # --- Извлекаем позы ---
+        # ============================================================
+        # 2. Параметры для проекции
+        # ============================================================
         R_ref = kf_ref.R_w2c
         t_ref = kf_ref.t_w2c.reshape(3, 1)
 
@@ -257,58 +273,67 @@ class MapVisualizer:
         img_ref_draw = img_ref.copy()
         img_cur_draw = img_cur.copy()
 
-        # --- Цвета ---
-        num_colors = len(shared_matches)
-        hsv_colors = np.linspace(0, 179, num_colors).astype(np.uint8)
+        # Цвета
+        n = len(shared_matches)
+        hsv = np.linspace(0, 179, n).astype(np.uint8)
         colors = [
-            tuple(map(int, cv2.cvtColor(np.uint8([[[h, 255, 255]]]), cv2.COLOR_HSV2BGR)[0, 0]))
-            for h in hsv_colors
+            tuple(map(int,
+                      cv2.cvtColor(np.uint8([[[h, 255, 255]]]),
+                                   cv2.COLOR_HSV2BGR)[0, 0]
+                      ))
+            for h in hsv
         ]
 
-        # --- Основной цикл отрисовки ---
-        for i, (idx_ref, idx_cur) in enumerate(shared_matches):
+        # ============================================================
+        # 3. Отрисовка каждого совпадения
+        # ============================================================
+        for i, ((cam_ref, kp_ref_idx), (cam_cur, kp_cur_idx), mp) in enumerate(shared_matches):
             color = colors[i]
 
-            kp_ref = kf_ref.keypoints[0][idx_ref].pt
-            kp_cur = kf_cur.keypoints[0][idx_cur].pt
+            # 2D keypoints
+            kp_ref = kf_ref.keypoints[cam_ref][kp_ref_idx].pt
+            kp_cur = kf_cur.keypoints[cam_cur][kp_cur_idx].pt
+
             kp_ref = tuple(map(int, kp_ref))
             kp_cur = tuple(map(int, kp_cur))
 
-            mp = kf_ref.map_points[idx_ref]
+            # 3D точка
             X = mp.position.reshape(1, 3).astype(np.float32)
 
-            # проекция ref
+            # проектируем
             p_ref, _ = cv2.projectPoints(X, rvec_ref, t_ref, K, None)
-            p_ref = tuple(map(int, p_ref.reshape(2)))
-
-            # проекция cur
             p_cur, _ = cv2.projectPoints(X, rvec_cur, t_cur, K, None)
+
+            p_ref = tuple(map(int, p_ref.reshape(2)))
             p_cur = tuple(map(int, p_cur.reshape(2)))
 
-            # --- рисуем keypoints ---
+            # рисуем keypoints
             cv2.circle(img_ref_draw, kp_ref, 4, (0, 0, 255), -1)
             cv2.circle(img_cur_draw, kp_cur, 4, (0, 0, 255), -1)
 
-            # --- рисуем проекции ---
+            # перспективные проекции
             cv2.circle(img_ref_draw, p_ref, 4, color, -1)
             cv2.circle(img_cur_draw, p_cur, 4, color, -1)
 
-            # подписи
-            cv2.putText(img_ref_draw, str(i), p_ref, cv2.FONT_HERSHEY_SIMPLEX,
-                        font_scale, color, 1, cv2.LINE_AA)
-            cv2.putText(img_cur_draw, str(i), p_cur, cv2.FONT_HERSHEY_SIMPLEX,
-                        font_scale, color, 1, cv2.LINE_AA)
+            cv2.putText(img_ref_draw, str(i), p_ref,
+                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 1)
+            cv2.putText(img_cur_draw, str(i), p_cur,
+                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 1)
 
-        # --- Склейка картинок ---
+        # ============================================================
+        # 4. Склейка изображений
+        # ============================================================
         h1, w1 = img_ref_draw.shape[:2]
         h2, w2 = img_cur_draw.shape[:2]
         W = max(w1, w2)
+
         out = np.zeros((h1 + h2, W, 3), dtype=np.uint8)
         out[:h1, :w1] = img_ref_draw
         out[h1:h1 + h2, :w2] = img_cur_draw
 
         win_name = f"{self.window_name_prefix} - {window_name}"
         cv2.imshow(win_name, out)
+
         if wait_key:
             key = cv2.waitKey(0) & 0xFF
             if key == ord('q'):
@@ -317,4 +342,5 @@ class MapVisualizer:
             cv2.waitKey(1)
 
         return out
+
 

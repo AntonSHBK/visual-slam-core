@@ -63,5 +63,4 @@ class FeatureManager:
     
     def filter_keypoints(self, type, frame, kps, des=None):
         # TODO Разобраться с фильтрацией
-        # pyslam_1\pyslam\local_features\feature_manager.py
         pass

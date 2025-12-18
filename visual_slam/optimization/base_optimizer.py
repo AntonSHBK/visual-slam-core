@@ -2,8 +2,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, List, Optional
 
-import numpy as np
-
 from visual_slam.config import Config
 from visual_slam.utils.logging import get_logger
 from visual_slam.map.keyframe import KeyFrame
@@ -24,6 +22,7 @@ class BaseOptimizer(ABC):
             log_file=f"{self.__class__.__name__.lower()}.log",
             log_level="INFO"
         )
+        self.logger.info(f"{'*'*80}")
  
     @abstractmethod
     def optimize_local(

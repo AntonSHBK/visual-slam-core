@@ -21,32 +21,22 @@ class DataSourceBase(ABC):
 
     @abstractmethod
     def reset(self):
-        """Сброс источника (например, начать воспроизведение с начала)."""
         pass
 
     @abstractmethod
     def is_ok(self) -> bool:
-        """Возвращает True, если источник готов отдавать кадры."""
         pass
 
     @abstractmethod
     def get_frame(self, idx: int = None):
-        """
-        Получить кадр по индексу (если оффлайн) или следующий (если поток).
-        Должен вернуть (изображение RGB или BGR, timestamp).
-        """
         pass
     
     @abstractmethod
     def get_frame_shape(self) -> tuple[int, int, int]:
-        """
-        Возвращает (height, width, channels) кадра.
-        """
         pass
 
     @abstractmethod
     def num_frames(self) -> int:
-        """Вернуть количество кадров, если доступно (иначе -1)."""
         pass
     
     @abstractmethod
@@ -55,10 +45,6 @@ class DataSourceBase(ABC):
 
 
 class DatasetSource(DataSourceBase):
-    """
-    Класс для работы с оффлайн-датасетами (например, набор картинок или видеофайл).
-    """
-
     def __init__(self, path: str, log_dir: str = "logs"):
         super().__init__(log_dir=log_dir)
         self.path = path
@@ -126,10 +112,6 @@ class DatasetSource(DataSourceBase):
 
 
 class CameraSource(DataSourceBase):
-    """
-    Класс для работы с живой камерой (cv2.VideoCapture).
-    """
-
     def __init__(
         self, 
         camera_id: int = 0, 

@@ -11,10 +11,6 @@ from visual_slam.utils.geometry import (
 )
 
 class Pose:
-    """
-    Класс для представления и работы с позой SE(3): вращение + перенос.
-    """
-
     def __init__(
         self,
         T: np.ndarray = None,
@@ -103,12 +99,13 @@ class Pose:
         self._T = T.copy()
 
     def set_RT(self, R: np.ndarray, t: np.ndarray):
-        """Обновить матрицу по R, t."""
         assert R.shape == (3, 3)
-        assert t.shape == (3,)
+        t = np.asarray(t).reshape(3)
+
         self._T = np.eye(4)
         self._T[:3, :3] = R
         self._T[:3, 3] = t
+
 
     def set_translation(self, t: np.ndarray):
         """Изменить только вектор переноса."""

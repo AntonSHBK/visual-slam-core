@@ -20,7 +20,31 @@ class FeatureTrackingResult:
     kps2_matched: np.ndarray  # shape (N,2), float32
     des1: Optional[np.ndarray]
     des2: Optional[np.ndarray]
+    
+    def filter_by_mask(self, mask: np.ndarray) -> "FeatureTrackingResult":
+        mask = np.asarray(mask).astype(bool)
+        if mask.ndim != 1 or mask.shape[0] != len(self.matches):
+            raise ValueError(
+                f"Mask shape {mask.shape} does not match number of matches {len(self.matches)}"
+            )
 
+        filtered_matches = [m for m, keep in zip(self.matches, mask) if keep]
+        filtered_idxs1 = [i for i, keep in zip(self.idxs1, mask) if keep]
+        filtered_idxs2 = [i for i, keep in zip(self.idxs2, mask) if keep]
+
+        filtered_kps1 = self.kps1_matched[mask]
+        filtered_kps2 = self.kps2_matched[mask]
+
+        return FeatureTrackingResult(
+            matches=filtered_matches,
+            idxs1=filtered_idxs1,
+            idxs2=filtered_idxs2,
+            kps1_matched=filtered_kps1,
+            kps2_matched=filtered_kps2,
+            des1=self.des1,
+            des2=self.des2,
+        )
+        
 
 class BaseTracker(ABC):
     @abstractmethod

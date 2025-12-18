@@ -1,4 +1,4 @@
-from typing import List, Optional, Any, Deque
+from typing import List
 
 import numpy as np
 
@@ -6,11 +6,6 @@ from visual_slam import camera
 from visual_slam.map.keyframe import KeyFrame
 from visual_slam.map.map_point import MapPoint
 from visual_slam.utils.logging import get_logger
-from visual_slam.utils.geometry import (
-    poseRt, 
-    inv_poseRt, 
-    rpy_from_rotation_matrix,
-)
 from visual_slam.utils.motion_estimation import (
     estimate_motion_from_2d2d,
     triangulate_points,
@@ -23,7 +18,7 @@ from visual_slam.utils.motion_estimation import (
 
 from visual_slam.utils.geometry import normalize
 from visual_slam.viz.feature_viz import FeatureVisualizer
-from visual_slam.frame import Frame
+from visual_slam.map.frame import Frame
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -51,8 +46,7 @@ class Initializer:
 
         self.min_inliers = self.config.tracking.min_inliers
         self.camera = self.tracking.camera
-        
-        self.frames = self.tracking.map.frames
+        self.map = self.tracking.map
         
         self.initialized: bool = False
         self.num_failures = 0
@@ -62,9 +56,9 @@ class Initializer:
         self.logger.info("\n\n[Initializer] Инициализация ====================>\n")
 
     def reset(self):
-        self.frames.clear()
         self.initialized = False
         self.min_inliers = self.config.tracking.min_inliers
+        self.map.reset()
         self.num_failures = 0
         self.logger.info("[Initializer] Сброс инициализатора.")
 
@@ -87,8 +81,8 @@ class Initializer:
             keypoints=keypoints_list,
             descriptors=descriptors_list,
         )
-        self.frames.append(frame)
-        self.logger.info(f"[Initializer] Добавлен кадр (всего {len(self.frames)})")
+        self.map.add_frame(frame=frame)
+        self.logger.info(f"[Initializer] Добавлен кадр (всего {len(self.map.get_frames())})")
         return frame
     
     def initialize(self, images, timestamp, depth=None) -> bool:
@@ -112,17 +106,15 @@ class Initializer:
             )
         
     def _initialize_mono(self, image, timestamp) -> bool:
-        # TODO уточнить в какой системе координат хранятся точки 
-        
         f_cur = self.add_frame(images=[image], timestamp=timestamp)
         
-        if len(self.frames) < 2:
+        if len(self.map.get_frames()) < 2:
             self.logger.info("[Initializer] Недостаточно кадров в очереди для инициализации.")
             return False
         
         Kinv = self.camera.get_intrinsics_inv()
 
-        for i, f_ref in enumerate(list(self.frames)[:-1]):
+        for i, f_ref in enumerate(self.map.get_frames()[:-1]):
 
             self.logger.info(f"[Initializer] Новый кадр {i}")
 
@@ -145,6 +137,16 @@ class Initializer:
             if len(matches) < self.min_inliers:
                 self.logger.info(f"[Initializer] Недостаточно совпадений после нахождения точек и матчей: {len(matches)} / {self.min_inliers}")
                 continue
+            
+            # self.viz.draw_keypoints(
+            #     f_cur.image_left,
+            #     f_cur.keypoints_left             
+            # )
+            
+            # self.viz.draw_keypoints(
+            #     f_ref.image_left,
+            #     f_ref.keypoints_left             
+            # )
             
             # self.viz.draw_matches(
             #     f_cur.image_gray_left,
@@ -178,21 +180,21 @@ class Initializer:
                 R_c2w = f_cur.R_c2w      # rotation: camera → world
                 t_c2w = f_cur.t_c2w      # translation: camera → world
 
-                roll_world, pitch_world, yaw_world = rpy_from_rotation_matrix(R_c2w, degrees=True)
-                roll_local, pitch_local, yaw_local = rpy_from_rotation_matrix(R_w2c, degrees=True)
+                # roll_world, pitch_world, yaw_world = rpy_from_rotation_matrix(R_c2w, degrees=True)
+                # roll_local, pitch_local, yaw_local = rpy_from_rotation_matrix(R_w2c, degrees=True)
                 
                 self.logger.info(
                     "[Initializer] Поза камеры (global frame):\n"
-                    f"  t_global = ({t_c2w[0]:.4f}, {t_c2w[1]:.4f}, {t_c2w[2]:.4f})\n"
-                    f"  R_global (RPY deg) = "
-                    f"({roll_world:.2f}, {pitch_world:.2f}, {yaw_world:.2f})"
+                    f"  t_c2w = ({t_c2w[0]:.4f}, {t_c2w[1]:.4f}, {t_c2w[2]:.4f})\n"
+                    # f"  R_global (RPY deg) = "
+                    # f"({roll_world:.2f}, {pitch_world:.2f}, {yaw_world:.2f})"
                 )
 
                 self.logger.info(
                     "[Initializer] Преобразование мира в локальные координаты камеры:\n"
                     f"  t_w2c = ({t_w2c[0]:.4f}, {t_w2c[1]:.4f}, {t_w2c[2]:.4f})\n"
-                    f"  R_w2c (RPY deg) = "
-                    f"({roll_local:.2f}, {pitch_local:.2f}, {yaw_local:.2f})"
+                    # f"  R_w2c (RPY deg) = "
+                    # f"({roll_local:.2f}, {pitch_local:.2f}, {yaw_local:.2f})"
                 )      
             
             if R_rel is None or inliers < self.min_inliers:
@@ -241,7 +243,7 @@ class Initializer:
                 T_w2c_ref,
                 T_w2c_cur,
                 min_depth=min_depth,
-                max_depth=max_depth
+                max_depth=50.0
             )
 
             pts_ref_n = pts_ref_n[mask_depth]
@@ -266,7 +268,7 @@ class Initializer:
             self.logger.info(f"[Initializer] Точек после фильтрации по параллаксу: {len(pts_3d)} / {len(mask_triang)} исходных")           
             
             self.logger.info(
-                f"[Initializer] Успешная пара {i} / {len(self.frames)-1}"
+                f"[Initializer] Успешная пара {i} / {len(self.map.get_frames())-1}"
             )
             self._finalize_initialization(
                 f_ref=f_ref,
@@ -345,8 +347,16 @@ class Initializer:
                 mp = MapPoint(position=p3d, color=color)
                 self.tracking.map.add_map_point(mp)
 
-                kf_ref.add_map_point(idx_ref, mp)
-                kf_cur.add_map_point(idx_cur, mp)
+                kf_ref.add_map_point(
+                    cam_id=cam_idx,
+                    kp_idx=idx_ref,
+                    map_point=mp
+                )
+                kf_cur.add_map_point(
+                    cam_id=cam_idx,
+                    kp_idx=idx_cur, 
+                    map_point=mp
+                )
 
                 num_points_added += 1
 
@@ -369,17 +379,16 @@ class Initializer:
         )
         self.logger.info(f"[Initializer] Средняя ошибка после оптимизации: {mean_err_after_optimize:.3f}px")
 
-        self._normalize_map_scale()
+        # TODO надо разобраться с масштабом карты, возможно вынести в map
+        # self._normalize_map_scale()
         
-        mean_err_after_normalize = self.tracking.map.compute_mean_reprojection_error(
-            camera=self.camera,
-            keyframes=[kf_cur]
-        )
-        self.logger.info(f"[Initializer] Средняя ошибка после нормализации: {mean_err_after_normalize:.3f}px")
+        # mean_err_after_normalize = self.tracking.map.compute_mean_reprojection_error(
+        #     camera=self.camera,
+        #     keyframes=[kf_cur]
+        # )
+        # self.logger.info(f"[Initializer] Средняя ошибка после нормализации: {mean_err_after_normalize:.3f}px")
         
         self.initialized = True        
-        self.frames.clear()
-
         self.logger.info("[Initializer] Инициализация завершена успешно.\n")
         
     def _can_initialize(self, f_ref: Frame, f_cur: Frame) -> bool:

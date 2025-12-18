@@ -136,10 +136,6 @@ class StereoCalibration:
         return l, r
 
 
-# ---------------------------------------- #
-#      Concrete loader with heuristics     #
-# ---------------------------------------- #
-
 class UniversalCalibration(CalibrationBase):
     """
     Универсальная калибровка:
@@ -215,10 +211,6 @@ class UniversalCalibration(CalibrationBase):
 
         return "\n".join(lines) if lines else "Пустая калибровка."
 
-
-
-    # ---------------- internal loaders ---------------- #
-
     def _load_kitti_txt(self, path: Path):
         """
         Поддержка KITTI:
@@ -286,7 +278,6 @@ class UniversalCalibration(CalibrationBase):
         with path.open('r') as f:
             data = yaml.safe_load(f)
 
-        # stereo как единый yaml
         if isinstance(data, dict) and "left" in data and "right" in data:
             L = data["left"]
             R = data["right"]
@@ -300,7 +291,6 @@ class UniversalCalibration(CalibrationBase):
             im_h = int(L.get("image_height", 0) or 0)
             image_size = (im_w, im_h) if im_w and im_h else None
 
-            # extrinsics могут отсутствовать — оставим идентичность; можно позже задать извне
             Rmat = np.eye(3, dtype=np.float64)
             T = np.array([0., 0., 0.], dtype=np.float64).reshape(3, 1)
 
@@ -310,7 +300,6 @@ class UniversalCalibration(CalibrationBase):
             self.logger.info("Распознан ROS/OpenCV stereo YAML.")
             return True
 
-        # mono
         if "camera_matrix" in data:
             K = np.array(data["camera_matrix"]["data"], dtype=np.float64).reshape(3, 3)
             dist = np.array(data.get("distortion_coefficients", {}).get("data", []), dtype=np.float64) if data.get("distortion_coefficients") else None
@@ -338,7 +327,6 @@ class UniversalCalibration(CalibrationBase):
         if not isinstance(data, dict):
             return False
 
-        # Kalibr: верхний уровень — имена камер
         cameras = [k for k, v in data.items() if isinstance(v, dict) and "intrinsics" in v]
         if not cameras:
             return False
@@ -361,15 +349,12 @@ class UniversalCalibration(CalibrationBase):
             return True
 
         if len(cameras) >= 2:
-            # считаем cameras[0] — левый, cameras[1] — правый
             L = data[cameras[0]]
             R = data[cameras[1]]
             K1, D1, res1, _ = parse_cam(L)
             K2, D2, res2, _ = parse_cam(R)
             size = res1 if all(res1) else (res2 if all(res2) else None)
 
-            # извлекаем экструinsics T_cn_cnm1 (правой относительно левой или наоборот)
-            # Kalibr обычно хранит T_cn_cnm1 в виде 4x4 (R|t)
             def get_RT(dd: Dict[str, Any]) -> Optional[np.ndarray]:
                 if "T_cn_cnm1" in dd:
                     return np.array(dd["T_cn_cnm1"], dtype=np.float64).reshape(4, 4)

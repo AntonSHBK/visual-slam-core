@@ -58,8 +58,6 @@ def setup_logging(log_dir: Path = Path("logs"), log_level: str = "INFO"):
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
 
-    # API и Model логгеры
-    # _create_logger("api", log_dir, "api.log", log_level, max_bytes=5 * 1024 * 1024, backup_count=3).propagate = True
 
 def get_logger(
     name: str,

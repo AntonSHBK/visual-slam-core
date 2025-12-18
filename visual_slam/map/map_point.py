@@ -34,53 +34,39 @@ class MapPoint:
         
         self._is_bad: bool = False
 
-    def add_observation(self, kf_idx: int, kp_idx: int) -> bool:
-        """
-        Добавить наблюдение (KeyFrame ID → KeyPoint index).
-        """
+    def add_observation(self, kf_idx: int, cam_id: int, kp_idx: int) -> bool:
         with self._lock:
-            return self.observations.add(kf_idx, kp_idx)
+            return self.observations.add(kf_idx, cam_id, kp_idx)
 
-    def remove_observation(self, kf_idx: int):
-        """Удалить наблюдение по кадру"""
+    def remove_observation(self, kf_id: int, cam_id: int | None = None) -> bool:
         with self._lock:
-            return self.observations.remove(kf_idx)
+            return self.observations.remove(kf_id, cam_id)
 
-    def get_observations(self) -> dict[int, int]:
-        """Вернуть копию словаря наблюдений."""
+    def get_observations(self) -> dict[int, dict[int, int]]:
         with self._lock:
-            return dict(self.observations._data)
-        
-    def get_observation(self, kf_idx: int) -> int | None:
-        """Получить индекс ключевой точки по кадру."""
+            return {kf: cam_dict.copy() for kf, cam_dict in self.observations._data.items()}
+
+    def get_observation(self, kf_id: int, cam_id: int | None = None):
         with self._lock:
-            return self.observations.get(kf_idx)
+            return self.observations.get(kf_id, cam_id)
         
     def clear_observations(self):
-        """Очистить все наблюдения."""
         with self._lock:
             self.observations.clear()
 
     def num_observations(self) -> int:
-        """Число наблюдений."""
         with self._lock:
             return len(self.observations)
 
     def update_position(self, new_position: np.ndarray):
-        """Обновить 3D-позицию точки."""
         with self._lock:
             self.position = np.asarray(new_position, dtype=float)
             
     def update_color(self, new_color: np.ndarray):
-        """Обновить цвет точки."""
         with self._lock:
             self.color = new_color
 
     def update_descriptor(self, descs: list[np.ndarray]):
-        """
-        Обновить дескриптор точки. Можно передавать список дескрипторов из наблюдений.
-        Пока берётся первый (можно доработать до медианного/среднего).
-        """
         with self._lock:
             if len(descs) == 0:
                 return

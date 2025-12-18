@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from re import L
 from typing import Any, List, Optional, Dict
 from threading import RLock
 
@@ -6,7 +7,7 @@ import numpy as np
 import cv2
 
 from visual_slam.map.map_point import MapPoint
-from visual_slam.pose import Pose
+from visual_slam.map.pose import Pose
 from visual_slam.camera import Camera
 from visual_slam.utils.geometry import (
     transform_points_numba
@@ -21,8 +22,8 @@ class FrameBase:
     
     def __init__(
         self,
-        id: int,
         camera: Camera,
+        id: int = None,
         pose: Pose = None,        
         timestamp: float = 0.0      
     ):
@@ -200,30 +201,23 @@ class FrameBase:
         if not self.is_in_image(uv, z) or z <= 0:
             return False, uv, z
 
-        # Центр камеры (Ow) в мировой системе
         with self._lock_pose:
             Ow = self.t_c2w
 
-        # Вектор от камеры к точке
         PO = map_point.position - Ow
         dist3D = np.linalg.norm(PO)
         if dist3D < 1e-6 or not np.isfinite(dist3D):
             return False, uv, z
 
-        # Вычисляем нормаль как направление "взгляда" (камера → точка)
         normal = PO / dist3D
 
-        # Проверяем угол между направлением камеры (ось Z в СК камеры)
-        # и направлением на точку (в мировой СК)
-        # Для этого получаем направление взгляда камеры в мировой системе:
         with self._lock_pose:
             Rwc = self.R_c2w
             view_dir = Rwc[:, 2]
 
         cos_view = np.dot(view_dir, normal)
 
-        # Проверка угла видимости (например, < 60°)
-        if cos_view < 0.5:  # cos(60°)
+        if cos_view < 0.5:
             return False, uv, z
 
         return True, uv, z
@@ -247,21 +241,18 @@ class FrameBase:
             Rwc = self.R_c2w
             view_dir = Rwc[:, 2]
 
-        # Векторы от камеры к точкам
         POs = points - Ow
         dists = np.linalg.norm(POs, axis=1)
         valid_mask = (dists > 1e-6) & np.isfinite(dists)
 
-        # Нормали (единичные направления)
         normals = np.zeros_like(POs)
         normals[valid_mask] = POs[valid_mask] / dists[valid_mask, None]
 
-        # Косинусы углов между направлением взгляда камеры и нормалями
         cos_view = normals @ view_dir
 
         are_in_image = self.are_in_image(uvs, zs)
         are_in_front = zs > 0
-        are_in_angle = cos_view > 0.5  # угол меньше 60°
+        are_in_angle = cos_view > 0.5
 
         flags = are_in_image & are_in_front & are_in_angle & valid_mask
 
@@ -277,10 +268,13 @@ class Frame(FrameBase):
         images_gray: List[np.ndarray] = None,      
         keypoints:List[List[Any]] = None,
         descriptors: List[np.ndarray] = None,
+        depth: Optional[List[np.ndarray]] = None,
         pose: Pose = None,
+        cameras_pose: Optional[List[Pose]] = None,
+        id=None
     ):
         super().__init__(
-            id=None, 
+            id=id, 
             camera=camera, 
             pose=pose, 
             timestamp=timestamp
@@ -290,9 +284,13 @@ class Frame(FrameBase):
 
         self.images: List[np.ndarray] = images or []
         self.images_gray: List[np.ndarray] = images_gray or []
+        
+        if cameras_pose is None:
+            self.cameras_pose: List[Pose] = [Pose() for _ in range(len(self.images))]
 
         self.keypoints: List[List[Any]] = keypoints or []
         self.descriptors: List[np.ndarray] = descriptors or []
+        self.depth: Optional[List[np.ndarray]] = depth
 
         if len(self.images_gray) == 0:
             for img in self.images:
@@ -400,4 +398,9 @@ class Frame(FrameBase):
             return self._pose.as_matrix()
 
     def __repr__(self):
-        return f"<Frame id={self.id}, kps={self.num_keypoints()}, time={self.timestamp:.3f}, pose t={self.t_w2c.round(3)}, R=\n{self.R_w2c.round(3)}>"
+        return (
+            f"<Frame id={self.id}, "
+            f"kps={self.num_keypoints()}, "
+            f"time={self.timestamp:.3f}, "
+            f"pose t={self.t_w2c.round(3)}"
+        )

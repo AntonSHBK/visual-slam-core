@@ -1,11 +1,12 @@
 from threading import RLock
 from typing import Dict, Optional
 
+from matplotlib.pylab import ndarray
 import numpy as np
 import cv2
 
-from visual_slam.frame import Frame
-from visual_slam.pose import Pose
+from visual_slam.map.frame import Frame
+from visual_slam.map.pose import Pose
 from visual_slam.camera import Camera
 from visual_slam.map.map_point import MapPoint
 
@@ -22,7 +23,9 @@ class KeyFrame(Frame):
         images_gray: Optional[list[np.ndarray]] = None,
         keypoints: Optional[list[np.ndarray]] = None,
         descriptors: Optional[list[np.ndarray]] = None,
+        depth: Optional[list[np.ndarray]] = None,
         pose: Optional[Pose] = None,
+        id = None
     ):
         super().__init__(
             timestamp=timestamp,
@@ -31,13 +34,15 @@ class KeyFrame(Frame):
             images_gray=images_gray,
             keypoints=keypoints,
             descriptors=descriptors,
+            depth=depth,
             pose=pose,
+            id=id
         )
         with KeyFrame._id_lock:
             self.keyframe_id = KeyFrame._next_id
             KeyFrame._next_id += 1
 
-        self.map_points: Dict[int, MapPoint] = {}
+        self.map_points: Dict[tuple[int, int], MapPoint] = {}
 
         self.is_bad: bool = False
         self.is_fixed: bool = False
@@ -59,6 +64,7 @@ class KeyFrame(Frame):
                 keypoints_copy.append([])
 
         descriptors_copy = [d.copy() for d in frame.descriptors if d is not None]
+        depth_copy = [d.copy() for d in frame.depth] if frame.depth is not None else []
 
         kf = cls(
             timestamp=frame.timestamp,
@@ -67,28 +73,31 @@ class KeyFrame(Frame):
             images_gray=images_gray_copy,
             keypoints=keypoints_copy,
             descriptors=descriptors_copy,
+            depth=depth_copy,
             pose=frame.get_pose().copy(),
         )
 
         return kf
     
-    def add_map_point(self, kp_idx: int, mappoint: MapPoint):
+    def add_map_point(self, cam_id: int, kp_idx: int, map_point: MapPoint):
         """Привязать MapPoint к данному KeyFrame по индексу ключевой точки."""
         with self._lock:
-            self.map_points[kp_idx] = mappoint
-            mappoint.add_observation(self.keyframe_id, kp_idx)
-
-    def get_map_point(self, kp_idx: int) -> Optional[MapPoint]:
-        """Получить MapPoint по индексу фичи."""
-        return self.map_points.get(kp_idx, None)
-
-    def remove_map_point(self, kp_idx: int):
-        """Удалить связь с точкой карты."""
+            self.map_points[(cam_id, kp_idx)] = map_point
+            map_point.add_observation(self.keyframe_id, cam_id, kp_idx)
+            
+    def get_map_point(self, cam_id: int, kp_idx: int) -> Optional[MapPoint]:
+        """Получить MapPoint, связанный с данным KeyFrame по индексу ключевой точки."""
         with self._lock:
-            if kp_idx in self.map_points:
-                mappoint = self.map_points[kp_idx]
-                mappoint.remove_observation(self.keyframe_id)
-                del self.map_points[kp_idx]
+            return self.map_points.get((cam_id, kp_idx), None)
+
+    def remove_map_point(self, cam_id: int, kp_idx: int):
+        """Удалить связь MapPoint с данным KeyFrame по индексу ключевой точки."""
+        with self._lock:
+            key = (cam_id, kp_idx)
+            if key in self.map_points:
+                mp = self.map_points[key]
+                mp.remove_observation(self.keyframe_id, cam_id)
+                del self.map_points[key]
 
     def get_all_mappoints(self) -> Dict[int, MapPoint]:
         """Вернуть все точки карты, связанные с этим KeyFrame."""
@@ -106,4 +115,5 @@ class KeyFrame(Frame):
             f"frame_id={self.id}, "
             f"mps={len(self.map_points)}, "
             f"time={self.timestamp:.3f}>"
+            f" pose t={self.t_w2c.round(3)}"
         )
