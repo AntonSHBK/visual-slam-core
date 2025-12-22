@@ -66,19 +66,18 @@ Detailed instructions on how to run and experiment with the system are provided 
 
 This document describes dataset preparation, configuration, execution flow, and available visualization and logging options.
 
-<!-- ## Citation
+## Citation
 
 ```bibtex
-@misc{px4_multi_drone_sim,
+@misc{visual_slam_python,
   author       = {Anton Pisarenko},
-  title        = {PX4 Multi-Drone Simulation Project},
-  year         = {2024},
+  title        = {Visual SLAM on Python},
+  year         = {2025},
   month        = {December},
-  howpublished = {\url{https://github.com/AntonSHBK/px4_multi_drone_sim}},
-  note         = {Accessed: 2024-12-24}
+  howpublished = {\url{https://github.com/AntonSHBK/visual-slam-core}},
+  note         = {Accessed: 2025-12-22}
 }
-``` -->
-
+```
 ## Contacts
 
 For questions or support, please contact:
