@@ -113,13 +113,15 @@ class Initializer:
             return False
         
         Kinv = self.camera.get_intrinsics_inv()
+        
+        self.logger.info(f"[Initializer] Количество кадров в карте: {len(self.map.get_frames())}")
 
         for i, f_ref in enumerate(self.map.get_frames()[:-1]):
 
             self.logger.info(f"[Initializer] Новый кадр {i}")
 
             if not self._can_initialize(f_ref, f_cur):
-                self.logger.info(f"[Initializer] Не прошёл _can_initialize")
+                self.logger.info(f"[Initializer] Не прошёл _can_initialize - пропускаем кадр {i}.")
                 continue
             
             feature_result = self.tracking.feature_tracker.track(
@@ -138,25 +140,25 @@ class Initializer:
                 self.logger.info(f"[Initializer] Недостаточно совпадений после нахождения точек и матчей: {len(matches)} / {self.min_inliers}")
                 continue
             
-            # self.viz.draw_keypoints(
-            #     f_cur.image_left,
-            #     f_cur.keypoints_left             
-            # )
+            self.viz.draw_keypoints(
+                f_cur.image_left,
+                f_cur.keypoints_left             
+            )
             
-            # self.viz.draw_keypoints(
-            #     f_ref.image_left,
-            #     f_ref.keypoints_left             
-            # )
+            self.viz.draw_keypoints(
+                f_ref.image_left,
+                f_ref.keypoints_left             
+            )
             
-            # self.viz.draw_matches(
-            #     f_cur.image_gray_left,
-            #     f_ref.image_gray_left,
-            #     f_cur.keypoints_left,
-            #     f_ref.keypoints_left,
-            #     matches,
-            #     window_name=f"Matches for Initialization {i} - {timestamp}",
-            #     max_display=None
-            # )
+            self.viz.draw_matches(
+                f_cur.image_gray_left,
+                f_ref.image_gray_left,
+                f_cur.keypoints_left,
+                f_ref.keypoints_left,
+                matches,
+                window_name=f"Matches for Initialization {i} - {timestamp}",
+                max_display=None
+            )
             
             pts_cur_n = normalize(Kinv, feature_result.kps1_matched)
             pts_ref_n = normalize(Kinv, feature_result.kps2_matched)
@@ -408,6 +410,7 @@ class Initializer:
             self.logger.info(f"[_can_initialize] Фичи распределены неравномерно по кадру.")
             return False
         
+        self.logger.info(f"[_can_initialize] Кадры прошли предварительные проверки.")
         return True
     
     def _normalize_map_scale(

@@ -7,13 +7,6 @@ from visual_slam.sensor_type import SensorType,  SensorItem
 
 @dataclass
 class CameraConfig:
-    width: int = 640
-    height: int = 480
-    fx: float = 525.0
-    fy: float = 525.0
-    cx: float = 320.0
-    cy: float = 240.0
-    dist_coeffs: list = field(default_factory=lambda: [0, 0, 0, 0, 0])
     sensor_type: SensorItem = SensorType.MONOCULAR
     
     is_mono: bool = sensor_type == SensorType.MONOCULAR

@@ -190,6 +190,22 @@ def rotmat2qvec(R: np.ndarray) -> np.ndarray:
     return qvec[[0, 1, 2, 3]]
 
 
+@njit()
+def transform_points_numba(
+    points_w: np.ndarray, 
+    Rcw: np.ndarray, 
+    tcw: np.ndarray
+) -> np.ndarray:
+    N = points_w.shape[0]
+    points_c = np.empty_like(points_w)
+    for i in range(N):
+        px, py, pz = points_w[i, 0], points_w[i, 1], points_w[i, 2]
+        points_c[i, 0] = Rcw[0, 0]*px + Rcw[0, 1]*py + Rcw[0, 2]*pz + tcw[0]
+        points_c[i, 1] = Rcw[1, 0]*px + Rcw[1, 1]*py + Rcw[1, 2]*pz + tcw[1]
+        points_c[i, 2] = Rcw[2, 0]*px + Rcw[2, 1]*py + Rcw[2, 2]*pz + tcw[2]
+    return points_c
+
+
 def compute_reprojection_error(
     points_3d: np.ndarray,
     points_2d: np.ndarray,
